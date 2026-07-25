@@ -27,6 +27,7 @@ export const menuItems = sqliteTable("menu_items", {
   category: text("category").notNull(),
   price: integer("price").notNull(),
   emoji: text("emoji").notNull().default("☕"),
+  imageKey: text("image_key"),
   popular: integer("popular", { mode: "boolean" }).notNull().default(false),
   available: integer("available", { mode: "boolean" }).notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),

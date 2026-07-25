@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type ChangeEvent,
   type FormEvent,
   type ReactNode,
   useCallback,
@@ -17,6 +18,8 @@ type MenuItem = {
   category: string;
   price: number;
   emoji: string;
+  imageKey?: string | null;
+  imageUrl?: string | null;
   popular?: boolean;
   available?: boolean;
   sortOrder?: number;
@@ -48,13 +51,6 @@ type PaymentSelection = {
   orderId: string;
   itemId: number;
   quantity: number;
-};
-
-type TableSession = {
-  tableNo: number;
-  accessCode: string;
-  expiresAt: string;
-  createdAt: string;
 };
 
 type View = "menu" | "cashier" | "kitchen" | "qr" | "menuEditor";
@@ -267,14 +263,8 @@ export function MenuSystem() {
   const [placing, setPlacing] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<string | null>(null);
   const [statusRefreshKey, setStatusRefreshKey] = useState(0);
-  const [tableAccess, setTableAccess] = useState({
-    checking: true,
-    active: false,
-    authorized: false,
-  });
-  const [tableCode, setTableCode] = useState("");
-  const [accessError, setAccessError] = useState("");
-  const [verifyingAccess, setVerifyingAccess] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const loadPublicMenu = useCallback(async () => {
     try {
@@ -299,80 +289,6 @@ export function MenuSystem() {
     const initialLoad = window.setTimeout(loadPublicMenu, 0);
     return () => window.clearTimeout(initialLoad);
   }, [loadPublicMenu]);
-
-  const checkTableAccess = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/table-sessions?table=${tableNo}`, {
-        cache: "no-store",
-      });
-      const payload = (await response.json()) as {
-        active?: boolean;
-        authorized?: boolean;
-      };
-      const authorized = response.ok && Boolean(payload.authorized);
-      setTableAccess({
-        checking: false,
-        active: response.ok && Boolean(payload.active),
-        authorized,
-      });
-      if (!authorized) {
-        setCart([]);
-        setCartOpen(false);
-      }
-    } catch {
-      setTableAccess((current) => ({ ...current, checking: false }));
-      setAccessError("Masa bağlantısı şu anda kontrol edilemiyor.");
-    }
-  }, [tableNo]);
-
-  useEffect(() => {
-    if (view !== "menu") return;
-    const initialLoad = window.setTimeout(checkTableAccess, 0);
-    const timer = window.setInterval(checkTableAccess, 4000);
-    return () => {
-      window.clearTimeout(initialLoad);
-      window.clearInterval(timer);
-    };
-  }, [checkTableAccess, view]);
-
-  const verifyTableAccess = async (event: FormEvent) => {
-    event.preventDefault();
-    if (verifyingAccess) return;
-    setVerifyingAccess(true);
-    setAccessError("");
-    try {
-      const response = await fetch("/api/table-sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "verify",
-          tableNo,
-          code: tableCode,
-        }),
-      });
-      const payload = (await response.json()) as {
-        active?: boolean;
-        authorized?: boolean;
-        error?: string;
-      };
-      if (!response.ok) {
-        setTableAccess({
-          checking: false,
-          active: payload.active !== false,
-          authorized: false,
-        });
-        throw new Error(payload.error || "Masa kodu doğrulanamadı.");
-      }
-      setTableAccess({ checking: false, active: true, authorized: true });
-      setTableCode("");
-    } catch (error) {
-      setAccessError(
-        error instanceof Error ? error.message : "Masa kodu doğrulanamadı.",
-      );
-    } finally {
-      setVerifyingAccess(false);
-    }
-  };
 
   const categories = useMemo(
     () => ["Tümü", ...Array.from(new Set(menuItems.map((item) => item.category)))],
@@ -435,10 +351,7 @@ export function MenuSystem() {
         }),
       });
       const payload = (await response.json()) as { id?: string; error?: string };
-      if (!response.ok) {
-        if (response.status === 403) await checkTableAccess();
-        throw new Error(payload.error || "Sipariş gönderilemedi.");
-      }
+      if (!response.ok) throw new Error(payload.error || "Sipariş gönderilemedi.");
       setConfirmedOrder(payload.id?.slice(0, 6).toUpperCase() ?? "");
       setCart([]);
       setNote("");
@@ -485,28 +398,18 @@ export function MenuSystem() {
     );
   }
 
-  if (!tableAccess.authorized) {
-    return (
-      <TableAccessGate
-        tableNo={tableNo}
-        checking={tableAccess.checking}
-        active={tableAccess.active}
-        code={tableCode}
-        error={accessError}
-        verifying={verifyingAccess}
-        onCodeChange={(value) =>
-          setTableCode(value.replace(/\D/g, "").slice(0, 6))
-        }
-        onSubmit={verifyTableAccess}
-        onStaff={() => navigate("cashier")}
-      />
-    );
-  }
-
-  const visibleItems =
-    resolvedCategory === "Tümü"
-      ? menuItems
-      : menuItems.filter((item) => item.category === resolvedCategory);
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase("tr-TR");
+  const visibleItems = menuItems.filter(
+    (item) =>
+      (resolvedCategory === "Tümü" || item.category === resolvedCategory) &&
+      (!normalizedSearch ||
+        `${item.name} ${item.description} ${item.category}`
+          .toLocaleLowerCase("tr-TR")
+          .includes(normalizedSearch)),
+  );
+  const featuredItem =
+    menuItems.find((item) => item.popular && item.imageUrl) ??
+    menuItems.find((item) => item.imageUrl);
 
   return (
     <main className="guest-app">
@@ -521,14 +424,34 @@ export function MenuSystem() {
             <strong>{String(tableNo).padStart(2, "0")}</strong>
           </div>
           <button
-            className="round-admin-button"
-            onClick={() => navigate("cashier")}
-            aria-label="Yönetim panelini aç"
+            className="round-search-button"
+            onClick={() => setSearchOpen((current) => !current)}
+            aria-label="Menüde ara"
           >
-            ☰
+            ⌕
           </button>
         </div>
       </header>
+
+      {searchOpen && (
+        <div className="menu-search-bar">
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Ürün veya kategori ara…"
+            autoFocus
+          />
+          <button
+            onClick={() => {
+              setSearchQuery("");
+              setSearchOpen(false);
+            }}
+            aria-label="Aramayı kapat"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <nav className="menu-tabs" aria-label="Menü kategorileri">
         {categories.map((item) => (
@@ -542,11 +465,18 @@ export function MenuSystem() {
         ))}
       </nav>
 
-      <section className="coffee-hero">
+      <section className={`coffee-hero ${featuredItem?.imageUrl ? "has-image" : ""}`}>
+        {featuredItem?.imageUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={featuredItem.imageUrl} alt={featuredItem.name} />
+        )}
         <div className="hero-copy-block">
-          <p>MASA {String(tableNo).padStart(2, "0")} · HOŞ GELDİN</p>
-          <h1>Bugün ne içersin?</h1>
-          <span>Seç, sipariş ver; masaya getirelim.</span>
+          <p>MASA {String(tableNo).padStart(2, "0")} · ŞEFİN SEÇİMİ</p>
+          <h1>{featuredItem?.name ?? "Bugün ne içersin?"}</h1>
+          <span>
+            {featuredItem?.description ??
+              "Taze hazırlanan favorilerimizi keşfet."}
+          </span>
         </div>
         <div className="coffee-stamp" aria-hidden="true">
           <span className="stamp-rays">✦</span>
@@ -573,8 +503,14 @@ export function MenuSystem() {
         <div className="typographic-menu">
           {visibleItems.map((item) => (
             <article className="coffee-item" key={item.id}>
-              <div className="item-icon" aria-hidden="true">
-                {item.emoji}
+              <div className="menu-item-photo">
+                {item.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={item.imageUrl} alt={item.name} loading="lazy" />
+                ) : (
+                  <span aria-label="Fotoğraf eklenmedi">masa.</span>
+                )}
+                {item.popular && <b>Çok sevilen</b>}
               </div>
               <div className="item-copy">
                 <div className="item-name-line">
@@ -585,7 +521,6 @@ export function MenuSystem() {
                 <p>{item.description}</p>
                 <div className="item-meta">
                   <span>{item.category}</span>
-                  {item.popular && <b>Çok sevilen</b>}
                 </div>
               </div>
               <button
@@ -690,96 +625,6 @@ export function MenuSystem() {
           </section>
         </div>
       )}
-    </main>
-  );
-}
-
-function TableAccessGate({
-  tableNo,
-  checking,
-  active,
-  code,
-  error,
-  verifying,
-  onCodeChange,
-  onSubmit,
-  onStaff,
-}: {
-  tableNo: number;
-  checking: boolean;
-  active: boolean;
-  code: string;
-  error: string;
-  verifying: boolean;
-  onCodeChange: (value: string) => void;
-  onSubmit: (event: FormEvent) => void;
-  onStaff: () => void;
-}) {
-  return (
-    <main className="table-access-page">
-      <header className="access-brand">
-        <div>
-          <strong>
-            masa<span>.</span>
-          </strong>
-          <small>KAHVE &amp; MUTFAK</small>
-        </div>
-        <div className="table-label" aria-label={`Masa ${tableNo}`}>
-          <span>Masa</span>
-          <strong>{String(tableNo).padStart(2, "0")}</strong>
-        </div>
-      </header>
-      <section className="table-access-card">
-        <div className="access-lock" aria-hidden="true">
-          {checking ? "…" : active ? "⌁" : "×"}
-        </div>
-        {checking ? (
-          <>
-            <p>MASA KONTROL EDİLİYOR</p>
-            <h1>Bir saniye…</h1>
-            <span>Güvenli masa oturumun kontrol ediliyor.</span>
-          </>
-        ) : active ? (
-          <>
-            <p>GÜVENLİ MASA GİRİŞİ</p>
-            <h1>Masa kodunu gir.</h1>
-            <span>
-              Bu kodu servis ekibinden alabilirsin. Kod her müşteri için
-              yenilenir.
-            </span>
-            <form onSubmit={onSubmit}>
-              <input
-                value={code}
-                onChange={(event) => onCodeChange(event.target.value)}
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                aria-label="6 haneli masa kodu"
-                placeholder="• • • • • •"
-                maxLength={6}
-                autoFocus
-              />
-              <button disabled={code.length !== 6 || verifying}>
-                {verifying ? "Kontrol ediliyor…" : "Menüyü aç"}
-              </button>
-            </form>
-          </>
-        ) : (
-          <>
-            <p>MASA SİPARİŞE KAPALI</p>
-            <h1>Bu oturum sona erdi.</h1>
-            <span>
-              Hesap kapandığı için bu QR bağlantısından yeni sipariş
-              verilemez. Yeni müşteriysen servis ekibinden masayı açmasını
-              iste.
-            </span>
-          </>
-        )}
-        {error && <div className="access-error">{error}</div>}
-        <button className="access-staff-link" onClick={onStaff}>
-          Personel girişi
-        </button>
-      </section>
-      <footer>Eski masa bağlantıları yeni oturumda geçersiz kalır.</footer>
     </main>
   );
 }
@@ -896,34 +741,18 @@ function CustomerOrderStatus({
 
 function useLiveOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [tableSessions, setTableSessions] = useState<TableSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const reload = useCallback(async () => {
     try {
-      const [ordersResponse, sessionsResponse] = await Promise.all([
-        fetch("/api/orders", { cache: "no-store" }),
-        fetch("/api/table-sessions", { cache: "no-store" }),
-      ]);
-      const ordersPayload = (await ordersResponse.json()) as {
+      const response = await fetch("/api/orders", { cache: "no-store" });
+      const payload = (await response.json()) as {
         orders?: Order[];
         error?: string;
       };
-      const sessionsPayload = (await sessionsResponse.json()) as {
-        sessions?: TableSession[];
-        error?: string;
-      };
-      if (!ordersResponse.ok) {
-        throw new Error(ordersPayload.error || "Siparişler alınamadı.");
-      }
-      if (!sessionsResponse.ok) {
-        throw new Error(
-          sessionsPayload.error || "Masa oturumları alınamadı.",
-        );
-      }
-      setOrders(ordersPayload.orders ?? []);
-      setTableSessions(sessionsPayload.sessions ?? []);
+      if (!response.ok) throw new Error(payload.error || "Siparişler alınamadı.");
+      setOrders(payload.orders ?? []);
       setError("");
     } catch (loadError) {
       setError(
@@ -975,36 +804,6 @@ function useLiveOrders() {
     return false;
   };
 
-  const openTableSession = async (tableNo: number) => {
-    const response = await fetch("/api/table-sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "open", tableNo }),
-    });
-    const payload = (await response.json()) as {
-      accessCode?: string;
-      error?: string;
-    };
-    if (!response.ok) {
-      throw new Error(payload.error || "Masa oturumu açılamadı.");
-    }
-    await reload();
-    return payload.accessCode ?? "";
-  };
-
-  const closeTableSession = async (tableNo: number) => {
-    const response = await fetch("/api/table-sessions", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tableNo }),
-    });
-    const payload = (await response.json()) as { error?: string };
-    if (!response.ok) {
-      throw new Error(payload.error || "Masa oturumu kapatılamadı.");
-    }
-    await reload();
-  };
-
   const takePayment = async (
     tableNo: number,
     selections: PaymentSelection[],
@@ -1036,14 +835,11 @@ function useLiveOrders() {
 
   return {
     orders,
-    tableSessions,
     loading,
     error,
     reload,
     updateStatus,
     closeTable,
-    openTableSession,
-    closeTableSession,
     takePayment,
   };
 }
@@ -1231,32 +1027,25 @@ function ManagementSidebar({
 function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
   const {
     orders,
-    tableSessions,
     loading,
     error,
     reload,
     updateStatus,
     closeTable,
-    openTableSession,
-    closeTableSession,
     takePayment,
   } = useLiveOrders();
   const [selectedTable, setSelectedTable] = useState<number | null>(null);
-  const [changingSessionTable, setChangingSessionTable] =
-    useState<number | null>(null);
   const operationalOrders = useMemo(
     () => orders.filter((order) => order.status !== "served"),
     [orders],
   );
-  const activeTables = new Set([
-    ...orders.map((order) => order.tableNo),
-    ...tableSessions.map((session) => session.tableNo),
-  ]).size;
+  const activeTables = new Set(orders.map((order) => order.tableNo)).size;
   const collectedTotal = orders.reduce(
     (sum, order) => sum + Number(order.paidTotal ?? 0),
     0,
   );
   const readyCount = orders.filter((order) => order.status === "ready").length;
+  const newestOrder = orders.find((order) => order.status === "new");
   const tableAccounts = useMemo(
     () =>
       Array.from({ length: 12 }, (_, index) => {
@@ -1264,13 +1053,9 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
         const tableOrders = orders.filter(
           (order) => order.tableNo === tableNo,
         );
-        const session = tableSessions.find(
-          (candidate) => candidate.tableNo === tableNo,
-        );
         return {
           tableNo,
           orders: tableOrders,
-          session,
           total: tableOrders.reduce(
             (sum, order) => sum + (order.remainingTotal ?? order.total),
             0,
@@ -1297,44 +1082,12 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
             tableOrders[0]?.status,
         };
       }),
-    [orders, tableSessions],
+    [orders],
   );
   const selectedOrders =
     selectedTable === null
       ? []
       : orders.filter((order) => order.tableNo === selectedTable);
-
-  const handleTableSession = async (
-    tableNo: number,
-    session?: TableSession,
-  ) => {
-    if (changingSessionTable !== null) return;
-    setChangingSessionTable(tableNo);
-    try {
-      if (session) {
-        if (
-          window.confirm(
-            `Masa ${tableNo} oturumu kapatılsın mı? Eski kod hemen geçersiz olur.`,
-          )
-        ) {
-          await closeTableSession(tableNo);
-        }
-      } else {
-        const accessCode = await openTableSession(tableNo);
-        window.alert(
-          `Masa ${tableNo} açıldı. Müşteri kodu: ${accessCode}`,
-        );
-      }
-    } catch (sessionError) {
-      window.alert(
-        sessionError instanceof Error
-          ? sessionError.message
-          : "Masa oturumu değiştirilemedi.",
-      );
-    } finally {
-      setChangingSessionTable(null);
-    }
-  };
 
   return (
     <main className="management-shell">
@@ -1350,6 +1103,20 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
             <button onClick={reload} aria-label="Siparişleri yenile">↻</button>
           </div>
         </header>
+
+        {newestOrder && (
+          <button
+            className="new-order-banner"
+            onClick={() => setSelectedTable(newestOrder.tableNo)}
+          >
+            <span>!</span>
+            <div>
+              <strong>Masa {String(newestOrder.tableNo).padStart(2, "0")}</strong>
+              <small>Yeni sipariş geldi · ayrıntıları görüntüle</small>
+            </div>
+            <b>İncele →</b>
+          </button>
+        )}
 
         <section className="metric-grid" aria-label="İşletme özeti">
           <article>
@@ -1381,34 +1148,26 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
               <h2>Masa hesapları</h2>
             </div>
             <span>
-              Boş masayı açın, oluşan 6 haneli kodu müşteriye verin.
+              Dolu masaya dokunarak siparişleri ve güncel hesabı görün.
             </span>
           </header>
           <div className="table-account-grid">
             {tableAccounts.map((account) => (
               <button
                 className={
-                  account.orders.length || account.session
-                    ? "occupied"
-                    : "available"
+                  account.orders.length ? "occupied" : "available"
                 }
                 key={account.tableNo}
-                onClick={() => {
-                  if (account.orders.length) {
-                    setSelectedTable(account.tableNo);
-                  } else {
-                    handleTableSession(account.tableNo, account.session);
-                  }
-                }}
-                disabled={changingSessionTable === account.tableNo}
+                onClick={() =>
+                  account.orders.length && setSelectedTable(account.tableNo)
+                }
+                disabled={!account.orders.length}
               >
                 <div className="table-card-head">
                   <span>Masa</span>
                   <strong>{String(account.tableNo).padStart(2, "0")}</strong>
                   <i
-                    className={
-                      account.orders.length || account.session ? "busy" : ""
-                    }
+                    className={account.orders.length ? "busy" : ""}
                   />
                 </div>
                 {account.orders.length ? (
@@ -1423,11 +1182,6 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
                     <div className="table-card-foot">
                       <span>{account.orders.length} sipariş</span>
                       <span>{account.itemCount} ödenmemiş ürün</span>
-                      {account.session && (
-                        <span className="table-session-code">
-                          Kod {account.session.accessCode}
-                        </span>
-                      )}
                       <b>
                         {account.activeStatus
                           ? statusText[account.activeStatus]
@@ -1435,20 +1189,10 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
                       </b>
                     </div>
                   </>
-                ) : account.session ? (
-                  <div className="table-session-state">
-                    <small>Müşteri giriş kodu</small>
-                    <strong>{account.session.accessCode}</strong>
-                    <span>Kapatmak için dokun</span>
-                  </div>
                 ) : (
                   <div className="table-empty-state">
-                    <span>
-                      {changingSessionTable === account.tableNo
-                        ? "Açılıyor…"
-                        : "Masayı aç"}
-                    </span>
-                    <small>Yeni güvenli kod üret</small>
+                    <span>Müsait</span>
+                    <small>Henüz açık hesap yok</small>
                   </div>
                 )}
               </button>
@@ -1986,14 +1730,25 @@ function KitchenScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
   return (
     <main className="kitchen-shell">
       <aside className="kitchen-rail">
-        <button className="kitchen-logo" onClick={() => onNavigate("cashier")}>
-          masa<span>.</span>
-        </button>
+        <div className="kitchen-brand">
+          <button className="kitchen-logo" onClick={() => onNavigate("cashier")}>
+            masa<span>.</span>
+          </button>
+          <small>Terminal #01</small>
+        </div>
         <nav>
-          <button className="active" aria-label="Mutfak siparişleri">◫</button>
-          <button onClick={() => onNavigate("cashier")} aria-label="Kasa paneli">▦</button>
-          <button onClick={() => onNavigate("qr")} aria-label="QR kodları">⌗</button>
-          <button onClick={() => onNavigate("menu")} aria-label="Menü">☕</button>
+          <button className="active" aria-label="Mutfak siparişleri">
+            <span>◫</span><em>Canlı siparişler</em>
+          </button>
+          <button onClick={() => onNavigate("cashier")} aria-label="Kasa paneli">
+            <span>▦</span><em>Masa planı</em>
+          </button>
+          <button onClick={() => onNavigate("menuEditor")} aria-label="Menü yönetimi">
+            <span>≡</span><em>Menü yönetimi</em>
+          </button>
+          <button onClick={() => onNavigate("qr")} aria-label="QR kodları">
+            <span>⌗</span><em>QR kodları</em>
+          </button>
         </nav>
       </aside>
       <section className="kitchen-main">
@@ -2082,6 +1837,8 @@ type MenuDraft = {
   category: string;
   price: number;
   emoji: string;
+  imageKey: string | null;
+  imageUrl: string | null;
   popular: boolean;
   available: boolean;
   sortOrder: number;
@@ -2099,6 +1856,7 @@ function MenuEditorScreen({
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<MenuDraft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const loadMenu = useCallback(async () => {
     try {
@@ -2151,6 +1909,9 @@ function MenuEditorScreen({
     setSaving(true);
     setError("");
     try {
+      const previousImageKey = draft.id
+        ? items.find((item) => item.id === draft.id)?.imageKey
+        : null;
       const response = await fetch("/api/menu", {
         method: draft.id ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
@@ -2159,6 +1920,12 @@ function MenuEditorScreen({
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) {
         throw new Error(payload.error || "Ürün kaydedilemedi.");
+      }
+      if (previousImageKey && previousImageKey !== draft.imageKey) {
+        await fetch(
+          `/api/menu-images?key=${encodeURIComponent(previousImageKey)}`,
+          { method: "DELETE" },
+        );
       }
       setDraft(null);
       await refreshMenus();
@@ -2170,6 +1937,43 @@ function MenuEditorScreen({
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const uploadDraftImage = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!draft || !file || uploadingImage) return;
+    setUploadingImage(true);
+    setError("");
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      const response = await fetch("/api/menu-images", {
+        method: "POST",
+        body: form,
+      });
+      const payload = (await response.json()) as {
+        key?: string;
+        url?: string;
+        error?: string;
+      };
+      if (!response.ok || !payload.key || !payload.url) {
+        throw new Error(payload.error || "Fotoğraf yüklenemedi.");
+      }
+      setDraft((current) =>
+        current
+          ? { ...current, imageKey: payload.key!, imageUrl: payload.url! }
+          : current,
+      );
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Fotoğraf yüklenemedi.",
+      );
+    } finally {
+      event.target.value = "";
+      setUploadingImage(false);
     }
   };
 
@@ -2208,6 +2012,12 @@ function MenuEditorScreen({
       if (!response.ok) {
         throw new Error(payload.error || "Ürün silinemedi.");
       }
+      if (item.imageKey) {
+        await fetch(
+          `/api/menu-images?key=${encodeURIComponent(item.imageKey)}`,
+          { method: "DELETE" },
+        );
+      }
       await refreshMenus();
     } catch (deleteError) {
       setError(
@@ -2237,6 +2047,8 @@ function MenuEditorScreen({
                 category: categories[0] ?? "Sıcak Kahveler",
                 price: 0,
                 emoji: "☕",
+                imageKey: null,
+                imageUrl: null,
                 popular: false,
                 available: true,
                 sortOrder: items.length + 1,
@@ -2280,7 +2092,14 @@ function MenuEditorScreen({
               key={item.id}
             >
               <header>
-                <span>{item.emoji}</span>
+                <span className="menu-editor-thumb">
+                  {item.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={item.imageUrl} alt="" />
+                  ) : (
+                    "masa."
+                  )}
+                </span>
                 <div>
                   <small>{item.category}</small>
                   <h2>{item.name}</h2>
@@ -2335,17 +2154,40 @@ function MenuEditorScreen({
               </button>
             </header>
             <div className="menu-editor-form">
-              <div className="menu-form-pair emoji-name">
+              <div className="menu-photo-editor">
+                <div>
+                  {draft.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={draft.imageUrl} alt={draft.name || "Ürün"} />
+                  ) : (
+                    <span>Fotoğraf eklenmedi</span>
+                  )}
+                </div>
                 <label>
-                  <span>Emoji</span>
+                  <span>
+                    {uploadingImage ? "Yükleniyor…" : "Fotoğraf seç"}
+                  </span>
                   <input
-                    value={draft.emoji}
-                    maxLength={8}
-                    onChange={(event) =>
-                      setDraft({ ...draft, emoji: event.target.value })
-                    }
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/avif"
+                    disabled={uploadingImage}
+                    onChange={uploadDraftImage}
                   />
                 </label>
+                {draft.imageKey && (
+                  <button
+                    type="button"
+                    disabled={uploadingImage}
+                    onClick={() =>
+                      setDraft({ ...draft, imageKey: null, imageUrl: null })
+                    }
+                  >
+                    Fotoğrafı kaldır
+                  </button>
+                )}
+                <small>JPG, PNG, WebP veya AVIF · en fazla 5 MB</small>
+              </div>
+              <div className="menu-form-pair">
                 <label>
                   <span>Ürün adı</span>
                   <input
@@ -2354,6 +2196,20 @@ function MenuEditorScreen({
                     placeholder="Örn. Vanilyalı Latte"
                     onChange={(event) =>
                       setDraft({ ...draft, name: event.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Sıralama</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={draft.sortOrder}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        sortOrder: Math.max(0, Number(event.target.value)),
+                      })
                     }
                   />
                 </label>
@@ -2488,8 +2344,7 @@ function QrScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
             <p>MASA YÖNETİMİ</p>
             <h1>QR Kodları</h1>
             <span>
-              Sabit QR doğru masayı açar; sipariş için her müşteriye yeni
-              oturum kodu verilir.
+              Her QR kod siparişi otomatik olarak doğru masaya bağlar.
             </span>
           </div>
           <button onClick={() => onNavigate("cashier")}>← Panele dön</button>
@@ -2512,7 +2367,7 @@ function QrScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
                   )}
                 </div>
                 <h2>Masa {String(table).padStart(2, "0")}</h2>
-                <p>QR’ı okut · Masa kodunu gir</p>
+                <p>Okut · Seç · Sipariş ver</p>
                 {codes[table] && (
                   <a href={codes[table]} download={`masa-${table}-qr.png`}>
                     QR kodu indir

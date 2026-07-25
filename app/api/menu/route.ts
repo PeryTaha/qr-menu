@@ -9,6 +9,7 @@ type MenuPayload = {
   category?: string;
   price?: number;
   emoji?: string;
+  imageKey?: string | null;
   popular?: boolean;
   available?: boolean;
   sortOrder?: number;
@@ -20,6 +21,9 @@ function normalizeMenuPayload(payload: MenuPayload) {
   const category = String(payload.category ?? "").trim().slice(0, 50);
   const price = Math.round(Number(payload.price));
   const emoji = String(payload.emoji ?? "☕").trim().slice(0, 16) || "☕";
+  const imageKey = payload.imageKey
+    ? String(payload.imageKey).trim().slice(0, 180)
+    : null;
   const sortOrder = Math.max(0, Math.round(Number(payload.sortOrder ?? 0)));
 
   if (!name || !category || !Number.isInteger(price) || price < 0) {
@@ -32,6 +36,7 @@ function normalizeMenuPayload(payload: MenuPayload) {
     category,
     price,
     emoji,
+    imageKey,
     popular: Boolean(payload.popular),
     available: payload.available !== false,
     sortOrder,
@@ -39,6 +44,7 @@ function normalizeMenuPayload(payload: MenuPayload) {
 }
 
 function mapMenuItem(row: Record<string, unknown>) {
+  const imageKey = row.imageKey ? String(row.imageKey) : null;
   return {
     ...row,
     id: Number(row.id),
@@ -46,6 +52,10 @@ function mapMenuItem(row: Record<string, unknown>) {
     popular: Boolean(row.popular),
     available: Boolean(row.available),
     sortOrder: Number(row.sortOrder),
+    imageKey,
+    imageUrl: imageKey
+      ? `/api/menu-images?key=${encodeURIComponent(imageKey)}`
+      : null,
   };
 }
 
@@ -63,6 +73,7 @@ export async function GET(request: Request) {
 
     const result = await env.DB.prepare(
       `SELECT id, name, description, category, price, emoji,
+        image_key AS imageKey,
         popular, available, sort_order AS sortOrder
        FROM menu_items
        ${admin ? "" : "WHERE available = 1"}
@@ -104,8 +115,8 @@ export async function POST(request: Request) {
 
     const result = await env.DB.prepare(
       `INSERT INTO menu_items
-        (name, description, category, price, emoji, popular, available, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (name, description, category, price, emoji, image_key, popular, available, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         item.name,
@@ -113,6 +124,7 @@ export async function POST(request: Request) {
         item.category,
         item.price,
         item.emoji,
+        item.imageKey,
         item.popular ? 1 : 0,
         item.available ? 1 : 0,
         item.sortOrder,
@@ -153,7 +165,7 @@ export async function PATCH(request: Request) {
     const result = await env.DB.prepare(
       `UPDATE menu_items
        SET name = ?, description = ?, category = ?, price = ?, emoji = ?,
-         popular = ?, available = ?, sort_order = ?
+         image_key = ?, popular = ?, available = ?, sort_order = ?
        WHERE id = ?`,
     )
       .bind(
@@ -162,6 +174,7 @@ export async function PATCH(request: Request) {
         item.category,
         item.price,
         item.emoji,
+        item.imageKey,
         item.popular ? 1 : 0,
         item.available ? 1 : 0,
         item.sortOrder,

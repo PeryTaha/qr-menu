@@ -5,37 +5,40 @@ import test from "node:test";
 const readProjectFile = (path) =>
   readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("requires an active table session for customer orders", async () => {
-  const [ordersRoute, sessionHelper, sessionsRoute] = await Promise.all([
+test("keeps QR ordering direct and closes fully paid tables", async () => {
+  const [ordersRoute, paymentsRoute, menuSystem] = await Promise.all([
     readProjectFile("app/api/orders/route.ts"),
-    readProjectFile("app/table-session.ts"),
-    readProjectFile("app/api/table-sessions/route.ts"),
-  ]);
-
-  assert.match(ordersRoute, /isAuthorizedTableSession\(request, tableNo\)/);
-  assert.match(ordersRoute, /status:\s*403/);
-  assert.match(sessionHelper, /HttpOnly;\s*SameSite=Lax/);
-  assert.match(sessionHelper, /expires_at > CURRENT_TIMESTAMP/);
-  assert.match(sessionsRoute, /action === "verify"/);
-  assert.match(sessionsRoute, /failed_attempts/);
-  assert.match(sessionsRoute, /2 minutes/);
-});
-
-test("invalidates the customer session when the bill is fully paid", async () => {
-  const [paymentsRoute, menuSystem, migration] = await Promise.all([
     readProjectFile("app/api/payments/route.ts"),
     readProjectFile("app/menu-system.tsx"),
-    readProjectFile("drizzle/0003_little_maginty.sql"),
   ]);
 
+  assert.doesNotMatch(ordersRoute, /isAuthorizedTableSession/);
+  assert.match(ordersRoute, /INSERT INTO orders/);
   assert.match(paymentsRoute, /const autoClosed = remainingTotal === 0/);
-  assert.match(
-    paymentsRoute,
-    /UPDATE table_sessions SET active = 0 WHERE table_no = \?/,
-  );
-  assert.match(menuSystem, /function TableAccessGate/);
-  assert.match(menuSystem, /6 haneli masa kodu/);
-  assert.match(menuSystem, /Eski masa bağlantıları yeni oturumda geçersiz kalır/);
-  assert.match(migration, /CREATE TABLE `table_sessions`/);
-  assert.match(migration, /CREATE UNIQUE INDEX `table_sessions_token_unique`/);
+  assert.match(paymentsRoute, /UPDATE orders SET status = 'closed'/);
+  assert.doesNotMatch(menuSystem, /function TableAccessGate/);
+  assert.match(menuSystem, /Okut · Seç · Sipariş ver/);
+});
+
+test("supports managed product photos and the supplied visual direction", async () => {
+  const [imageRoute, menuRoute, menuSystem, styles, hosting, migration] =
+    await Promise.all([
+      readProjectFile("app/api/menu-images/route.ts"),
+      readProjectFile("app/api/menu/route.ts"),
+      readProjectFile("app/menu-system.tsx"),
+      readProjectFile("app/globals.css"),
+      readProjectFile(".openai/hosting.json"),
+      readProjectFile("drizzle/0004_lovely_wolfsbane.sql"),
+    ]);
+
+  assert.match(imageRoute, /env\.MEDIA\.put/);
+  assert.match(imageRoute, /5 \* 1024 \* 1024/);
+  assert.match(menuRoute, /image_key AS imageKey/);
+  assert.match(menuRoute, /\/api\/menu-images\?key=/);
+  assert.match(menuSystem, /className="menu-item-photo"/);
+  assert.match(menuSystem, /Fotoğraf seç/);
+  assert.match(styles, /\.new-order-banner/);
+  assert.match(styles, /\.kitchen-shell \{ grid-template-columns: 248px 1fr/);
+  assert.match(hosting, /"r2": "MEDIA"/);
+  assert.match(migration, /ADD `image_key` text/);
 });

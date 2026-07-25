@@ -42,6 +42,7 @@ export async function ensureAppSchema() {
         category TEXT NOT NULL,
         price INTEGER NOT NULL,
         emoji TEXT NOT NULL DEFAULT '☕',
+        image_key TEXT,
         popular INTEGER NOT NULL DEFAULT 0,
         available INTEGER NOT NULL DEFAULT 1,
         sort_order INTEGER NOT NULL DEFAULT 0,
@@ -67,6 +68,11 @@ export async function ensureAppSchema() {
       "CREATE INDEX IF NOT EXISTS table_sessions_active_idx ON table_sessions (active, expires_at)",
     ),
   ]);
+
+  const menuColumns = await db.prepare("PRAGMA table_info(menu_items)").all();
+  if (!menuColumns.results.some((column) => column.name === "image_key")) {
+    await db.prepare("ALTER TABLE menu_items ADD COLUMN image_key TEXT").run();
+  }
 
   const seedState = await db
     .prepare("SELECT seq FROM sqlite_sequence WHERE name = 'menu_items'")

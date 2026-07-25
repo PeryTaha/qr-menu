@@ -1,6 +1,5 @@
 import { env } from "cloudflare:workers";
 import { isStaffRequest } from "@/app/staff-auth";
-import { isAuthorizedTableSession } from "@/app/table-session";
 import { ensureAppSchema } from "@/db/runtime";
 
 type OrderItem = {
@@ -31,17 +30,9 @@ export async function GET(request: Request) {
     const requestedTable = Number(url.searchParams.get("table"));
     const hasTableFilter =
       Number.isInteger(requestedTable) && requestedTable > 0;
-    if (
-      (hasTableFilter &&
-        !(await isAuthorizedTableSession(request, requestedTable))) ||
-      (!hasTableFilter && !(await isStaffRequest(request)))
-    ) {
+    if (!hasTableFilter && !(await isStaffRequest(request))) {
       return Response.json(
-        {
-          error: hasTableFilter
-            ? "Masa oturumu kapalı veya süresi dolmuş."
-            : "Personel oturumu gerekli.",
-        },
+        { error: "Personel oturumu gerekli." },
         { status: 401 },
       );
     }
@@ -160,12 +151,6 @@ export async function POST(request: Request) {
     }
 
     await ensureAppSchema();
-    if (!(await isAuthorizedTableSession(request, tableNo))) {
-      return Response.json(
-        { error: "Masa oturumu kapalı veya süresi dolmuş." },
-        { status: 403 },
-      );
-    }
     const quantities = new Map<number, number>();
     for (const item of requestedItems) {
       const id = Number(item.id);
