@@ -22,7 +22,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol =
     requestHeaders.get("x-forwarded-proto") ??
     (host.includes("localhost") ? "http" : "https");
-  const imageUrl = `${protocol}://${host}/og-v2.png`;
+  const imageUrl = `${protocol}://${host}/og-v3.png`;
   const title = "masa. | Dijital Menü ve Sipariş";
   const description =
     "Masaya özel QR menü, mobil sipariş, yönetim paneli ve mutfak ekranı.";

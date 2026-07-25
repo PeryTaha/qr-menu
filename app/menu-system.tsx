@@ -18,7 +18,7 @@ type CartItem = MenuItem & { quantity: number };
 type Order = {
   id: string;
   tableNo: number;
-  status: "new" | "preparing" | "ready" | "served";
+  status: "new" | "preparing" | "ready" | "served" | "closed";
   items: Array<{
     id: number;
     name: string;
@@ -200,10 +200,11 @@ const categories = [
 ];
 
 const statusText: Record<Order["status"], string> = {
-  new: "Yeni sipariş",
+  new: "Sipariş alındı",
   preparing: "Hazırlanıyor",
   ready: "Hazır",
   served: "Teslim edildi",
+  closed: "Hesap kapandı",
 };
 
 const money = (value: number) =>
@@ -231,6 +232,7 @@ export function MenuSystem() {
   const [note, setNote] = useState("");
   const [placing, setPlacing] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<string | null>(null);
+  const [statusRefreshKey, setStatusRefreshKey] = useState(0);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -299,6 +301,7 @@ export function MenuSystem() {
       setCart([]);
       setNote("");
       setCartOpen(false);
+      setStatusRefreshKey((current) => current + 1);
     } catch (error) {
       window.alert(
         error instanceof Error ? error.message : "Sipariş gönderilemedi.",
@@ -367,6 +370,11 @@ export function MenuSystem() {
           <small>TAZE · SICAK · MUTLU</small>
         </div>
       </section>
+
+      <CustomerOrderStatus
+        tableNo={tableNo}
+        refreshKey={statusRefreshKey}
+      />
 
       <section className="menu-canvas">
         <div className="menu-title-row">
@@ -501,6 +509,113 @@ export function MenuSystem() {
   );
 }
 
+function CustomerOrderStatus({
+  tableNo,
+  refreshKey,
+}: {
+  tableNo: number;
+  refreshKey: number;
+}) {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    const loadStatus = async () => {
+      try {
+        const response = await fetch(`/api/orders?table=${tableNo}`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as {
+          orders?: Order[];
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error || "Sipariş durumu alınamadı.");
+        }
+        if (active) {
+          setOrders(payload.orders ?? []);
+          setError("");
+        }
+      } catch {
+        if (active) setError("Sipariş durumu şu anda yenilenemiyor.");
+      }
+    };
+
+    loadStatus();
+    const timer = window.setInterval(loadStatus, 4000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [tableNo, refreshKey]);
+
+  if (!orders.length && !error) return null;
+
+  const tableTotal = orders.reduce((sum, order) => sum + order.total, 0);
+  const steps = [
+    { status: "new", label: "Alındı" },
+    { status: "preparing", label: "Hazırlanıyor" },
+    { status: "ready", label: "Hazır" },
+    { status: "served", label: "Teslim" },
+  ] as const;
+  const ranks: Record<Order["status"], number> = {
+    new: 0,
+    preparing: 1,
+    ready: 2,
+    served: 3,
+    closed: 3,
+  };
+
+  return (
+    <section className="customer-status-panel" aria-live="polite">
+      <header>
+        <div>
+          <p>CANLI SİPARİŞ TAKİBİ</p>
+          <h2>Masa {String(tableNo).padStart(2, "0")} hesabı</h2>
+        </div>
+        <div className="customer-account-total">
+          <span>Güncel hesap</span>
+          <strong>{money(tableTotal)}</strong>
+        </div>
+      </header>
+      {error && <p className="customer-status-error">{error}</p>}
+      <div className="customer-order-status-list">
+        {orders.map((order, orderIndex) => {
+          const rank = ranks[order.status];
+          return (
+            <article className="customer-status-card" key={order.id}>
+              <div className="customer-status-head">
+                <div>
+                  <span>Sipariş {orders.length - orderIndex}</span>
+                  <small>#{order.id.slice(0, 6).toUpperCase()}</small>
+                </div>
+                <div>
+                  <strong>{statusText[order.status]}</strong>
+                  <small>{money(order.total)}</small>
+                </div>
+              </div>
+              <div className="status-timeline">
+                {steps.map((step, index) => (
+                  <div
+                    className={
+                      index < rank ? "done" : index === rank ? "active" : ""
+                    }
+                    key={step.status}
+                  >
+                    <i>{index <= rank ? "✓" : ""}</i>
+                    <span>{step.label}</span>
+                  </div>
+                ))}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function useLiveOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -533,7 +648,7 @@ function useLiveOrders() {
 
   const updateStatus = async (id: string, status: Order["status"]) => {
     setOrders((current) =>
-      status === "served"
+      status === "closed"
         ? current.filter((order) => order.id !== id)
         : current.map((order) =>
             order.id === id ? { ...order, status } : order,
@@ -547,7 +662,30 @@ function useLiveOrders() {
     if (!response.ok) reload();
   };
 
-  return { orders, loading, error, reload, updateStatus };
+  const closeTable = async (tableNo: number) => {
+    const response = await fetch("/api/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tableNo, status: "closed" }),
+    });
+    if (response.ok) {
+      setOrders((current) =>
+        current.filter((order) => order.tableNo !== tableNo),
+      );
+      return true;
+    }
+    reload();
+    return false;
+  };
+
+  return {
+    orders,
+    loading,
+    error,
+    reload,
+    updateStatus,
+    closeTable,
+  };
 }
 
 function ManagementSidebar({
@@ -598,10 +736,55 @@ function ManagementSidebar({
 }
 
 function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
-  const { orders, loading, error, reload, updateStatus } = useLiveOrders();
+  const {
+    orders,
+    loading,
+    error,
+    reload,
+    updateStatus,
+    closeTable,
+  } = useLiveOrders();
+  const [selectedTable, setSelectedTable] = useState<number | null>(null);
+  const operationalOrders = useMemo(
+    () => orders.filter((order) => order.status !== "served"),
+    [orders],
+  );
   const activeTables = new Set(orders.map((order) => order.tableNo)).size;
   const dailyRevenue = orders.reduce((sum, order) => sum + order.total, 0);
   const readyCount = orders.filter((order) => order.status === "ready").length;
+  const tableAccounts = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, index) => {
+        const tableNo = index + 1;
+        const tableOrders = orders.filter(
+          (order) => order.tableNo === tableNo,
+        );
+        return {
+          tableNo,
+          orders: tableOrders,
+          total: tableOrders.reduce((sum, order) => sum + order.total, 0),
+          itemCount: tableOrders.reduce(
+            (sum, order) =>
+              sum +
+              order.items.reduce(
+                (itemSum, item) => itemSum + item.quantity,
+                0,
+              ),
+            0,
+          ),
+          activeStatus:
+            tableOrders.find((order) => order.status === "new")?.status ??
+            tableOrders.find((order) => order.status === "preparing")?.status ??
+            tableOrders.find((order) => order.status === "ready")?.status ??
+            tableOrders[0]?.status,
+        };
+      }),
+    [orders],
+  );
+  const selectedOrders =
+    selectedTable === null
+      ? []
+      : orders.filter((order) => order.tableNo === selectedTable);
 
   return (
     <main className="management-shell">
@@ -626,7 +809,7 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
           </article>
           <article>
             <span>AÇIK SİPARİŞ</span>
-            <strong>{String(orders.length).padStart(2, "0")}</strong>
+            <strong>{String(operationalOrders.length).padStart(2, "0")}</strong>
             <i className="metric-icon orange">◴</i>
           </article>
           <article>
@@ -639,6 +822,58 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
             <strong>{String(readyCount).padStart(2, "0")}</strong>
             <i className="metric-icon blue">✓</i>
           </article>
+        </section>
+
+        <section className="table-accounts-section">
+          <header>
+            <div>
+              <p>MASA PLANI</p>
+              <h2>Masa hesapları</h2>
+            </div>
+            <span>
+              Dolu masaya dokunarak tüm siparişleri ve güncel hesabı görün.
+            </span>
+          </header>
+          <div className="table-account-grid">
+            {tableAccounts.map((account) => (
+              <button
+                className={account.orders.length ? "occupied" : ""}
+                key={account.tableNo}
+                onClick={() =>
+                  account.orders.length && setSelectedTable(account.tableNo)
+                }
+                disabled={!account.orders.length}
+              >
+                <div className="table-card-head">
+                  <span>Masa</span>
+                  <strong>{String(account.tableNo).padStart(2, "0")}</strong>
+                  <i className={account.orders.length ? "busy" : ""} />
+                </div>
+                {account.orders.length ? (
+                  <>
+                    <div className="table-card-total">
+                      <small>Güncel hesap</small>
+                      <strong>{money(account.total)}</strong>
+                    </div>
+                    <div className="table-card-foot">
+                      <span>{account.orders.length} sipariş</span>
+                      <span>{account.itemCount} ürün</span>
+                      <b>
+                        {account.activeStatus
+                          ? statusText[account.activeStatus]
+                          : ""}
+                      </b>
+                    </div>
+                  </>
+                ) : (
+                  <div className="table-empty-state">
+                    <span>Boş masa</span>
+                    <small>Henüz açık hesap yok</small>
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
         </section>
 
         <section className="live-order-section">
@@ -656,16 +891,18 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
 
           {error && <div className="admin-error">{error}</div>}
           <div className="admin-order-grid" aria-live="polite">
-            {!orders.length && (
+            {!operationalOrders.length && (
               <div className="admin-empty">
                 <span>◎</span>
                 <strong>
-                  {loading ? "Siparişler yükleniyor…" : "Henüz açık sipariş yok"}
+                  {loading
+                    ? "Siparişler yükleniyor…"
+                    : "Hazırlanacak sipariş yok"}
                 </strong>
-                <p>Müşteriden gelen yeni sipariş burada görünecek.</p>
+                <p>Yeni sipariş geldiğinde burada bir işlem kartı açılacak.</p>
               </div>
             )}
-            {orders.map((order) => (
+            {operationalOrders.map((order) => (
               <article
                 className={`admin-order-card status-${order.status}`}
                 key={order.id}
@@ -702,7 +939,131 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
           </div>
         </section>
       </section>
+      {selectedTable !== null && selectedOrders.length > 0 && (
+        <TableAccountModal
+          tableNo={selectedTable}
+          orders={selectedOrders}
+          onClose={() => setSelectedTable(null)}
+          onCloseAccount={async () => {
+            const closed = await closeTable(selectedTable);
+            if (closed) setSelectedTable(null);
+          }}
+        />
+      )}
     </main>
+  );
+}
+
+function TableAccountModal({
+  tableNo,
+  orders,
+  onClose,
+  onCloseAccount,
+}: {
+  tableNo: number;
+  orders: Order[];
+  onClose: () => void;
+  onCloseAccount: () => Promise<void>;
+}) {
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const accountTotal = orders.reduce((sum, order) => sum + order.total, 0);
+  const itemCount = orders.reduce(
+    (sum, order) =>
+      sum +
+      order.items.reduce(
+        (itemSum, item) => itemSum + item.quantity,
+        0,
+      ),
+    0,
+  );
+
+  return (
+    <div className="table-account-backdrop" onClick={onClose}>
+      <aside
+        className="table-account-drawer"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <p>MASA HESABI</p>
+            <h2>Masa {String(tableNo).padStart(2, "0")}</h2>
+            <span>
+              {orders.length} sipariş · {itemCount} ürün
+            </span>
+          </div>
+          <button onClick={onClose} aria-label="Masa hesabını kapat">×</button>
+        </header>
+
+        <div className="table-order-history">
+          {orders.map((order, index) => (
+            <article key={order.id}>
+              <div className="table-history-head">
+                <div>
+                  <strong>Sipariş {orders.length - index}</strong>
+                  <small>
+                    {formatTime(order.createdAt)} · #
+                    {order.id.slice(0, 6).toUpperCase()}
+                  </small>
+                </div>
+                <span className={`status-badge ${order.status}`}>
+                  {statusText[order.status]}
+                </span>
+              </div>
+              <div className="table-history-items">
+                {order.items.map((item) => (
+                  <div key={item.id}>
+                    <span>
+                      <b>{item.quantity}×</b> {item.name}
+                    </span>
+                    <small>{money(item.price * item.quantity)}</small>
+                  </div>
+                ))}
+              </div>
+              {order.note && <p>Not: {order.note}</p>}
+              <footer>
+                <span>Sipariş toplamı</span>
+                <strong>{money(order.total)}</strong>
+              </footer>
+            </article>
+          ))}
+        </div>
+
+        <div className="table-account-summary">
+          <span>Güncel hesap toplamı</span>
+          <strong>{money(accountTotal)}</strong>
+        </div>
+
+        {!confirmClose ? (
+          <button
+            className="close-account-button"
+            onClick={() => setConfirmClose(true)}
+          >
+            Hesabı kapat
+          </button>
+        ) : (
+          <div className="close-account-confirm">
+            <p>
+              Masa {tableNo} hesabı kapatılacak ve yeni müşteri için
+              sıfırlanacak.
+            </p>
+            <div>
+              <button onClick={() => setConfirmClose(false)}>Vazgeç</button>
+              <button
+                disabled={closing}
+                onClick={async () => {
+                  setClosing(true);
+                  await onCloseAccount();
+                  setClosing(false);
+                }}
+              >
+                {closing ? "Kapatılıyor…" : "Evet, hesabı kapat"}
+              </button>
+            </div>
+          </div>
+        )}
+      </aside>
+    </div>
   );
 }
 
@@ -745,6 +1106,10 @@ function OrderAction({
 
 function KitchenScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
   const { orders, loading, error, reload, updateStatus } = useLiveOrders();
+  const operationalOrders = useMemo(
+    () => orders.filter((order) => order.status !== "served"),
+    [orders],
+  );
   const [clock, setClock] = useState("");
 
   useEffect(() => {
@@ -782,7 +1147,7 @@ function KitchenScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
           </div>
           <div className="kitchen-stats">
             <span className="kitchen-online"><i /> Bağlı</span>
-            <div><small>AKTİF FİŞ</small><strong>{orders.length}</strong></div>
+            <div><small>AKTİF FİŞ</small><strong>{operationalOrders.length}</strong></div>
             <div><small>ORT. SÜRE</small><strong>12 dk</strong></div>
             <button onClick={reload} aria-label="Siparişleri yenile">↻</button>
           </div>
@@ -790,14 +1155,14 @@ function KitchenScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
 
         {error && <div className="kitchen-error">{error}</div>}
         <section className="ticket-board" aria-live="polite">
-          {!orders.length && (
+          {!operationalOrders.length && (
             <div className="kitchen-empty">
               <span>◌</span>
               <h2>{loading ? "Siparişler yükleniyor…" : "Mutfak hazır"}</h2>
               <p>Yeni sipariş geldiğinde burada bir fiş açılacak.</p>
             </div>
           )}
-          {orders.map((order) => (
+          {operationalOrders.map((order) => (
             <article className={`kitchen-ticket ticket-${order.status}`} key={order.id}>
               <header>
                 <div>

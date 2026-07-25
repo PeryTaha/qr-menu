@@ -7,7 +7,13 @@ type OrderItem = {
   quantity: number;
 };
 
-const allowedStatuses = new Set(["new", "preparing", "ready", "served"]);
+const allowedStatuses = new Set([
+  "new",
+  "preparing",
+  "ready",
+  "served",
+  "closed",
+]);
 
 async function ensureSchema() {
   const db = env.DB;
@@ -32,17 +38,31 @@ async function ensureSchema() {
   ]);
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     await ensureSchema();
-    const result = await env.DB.prepare(
-      `SELECT id, table_no AS tableNo, status, items, note, total,
-        created_at AS createdAt
-       FROM orders
-       WHERE status != 'served'
-       ORDER BY created_at DESC
-       LIMIT 80`,
-    ).all();
+    const url = new URL(request.url);
+    const requestedTable = Number(url.searchParams.get("table"));
+    const hasTableFilter =
+      Number.isInteger(requestedTable) && requestedTable > 0;
+    const query = hasTableFilter
+      ? env.DB.prepare(
+          `SELECT id, table_no AS tableNo, status, items, note, total,
+            created_at AS createdAt
+           FROM orders
+           WHERE status != 'closed' AND table_no = ?
+           ORDER BY created_at DESC
+           LIMIT 100`,
+        ).bind(requestedTable)
+      : env.DB.prepare(
+          `SELECT id, table_no AS tableNo, status, items, note, total,
+            created_at AS createdAt
+           FROM orders
+           WHERE status != 'closed'
+           ORDER BY created_at DESC
+           LIMIT 100`,
+        );
+    const result = await query.all();
 
     const orders = result.results.map((row) => ({
       ...row,
@@ -111,11 +131,16 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const payload = (await request.json()) as { id?: string; status?: string };
+    const payload = (await request.json()) as {
+      id?: string;
+      tableNo?: number;
+      status?: string;
+    };
     const id = String(payload.id ?? "");
+    const tableNo = Number(payload.tableNo);
     const status = String(payload.status ?? "");
 
-    if (!id || !allowedStatuses.has(status)) {
+    if (!allowedStatuses.has(status)) {
       return Response.json(
         { error: "Geçersiz sipariş güncellemesi." },
         { status: 400 },
@@ -123,17 +148,39 @@ export async function PATCH(request: Request) {
     }
 
     await ensureSchema();
-    const result = await env.DB.prepare(
-      "UPDATE orders SET status = ? WHERE id = ?",
-    )
-      .bind(status, id)
-      .run();
+    const isTableClose =
+      status === "closed" &&
+      Number.isInteger(tableNo) &&
+      tableNo > 0;
+    if (!id && !isTableClose) {
+      return Response.json(
+        { error: "Sipariş veya masa numarası gerekli." },
+        { status: 400 },
+      );
+    }
+
+    const result = isTableClose
+      ? await env.DB.prepare(
+          "UPDATE orders SET status = 'closed' WHERE table_no = ? AND status != 'closed'",
+        )
+          .bind(tableNo)
+          .run()
+      : await env.DB.prepare(
+          "UPDATE orders SET status = ? WHERE id = ?",
+        )
+          .bind(status, id)
+          .run();
 
     if (!result.meta.changes) {
       return Response.json({ error: "Sipariş bulunamadı." }, { status: 404 });
     }
 
-    return Response.json({ id, status });
+    return Response.json({
+      id: isTableClose ? undefined : id,
+      tableNo: isTableClose ? tableNo : undefined,
+      status,
+      changed: result.meta.changes,
+    });
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Sipariş güncellenemedi." },
