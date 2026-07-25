@@ -773,6 +773,7 @@ function useLiveOrders() {
       total?: number;
       remainingTotal?: number;
       method?: PaymentMethod;
+      autoClosed?: boolean;
       error?: string;
     };
     if (!response.ok) {
@@ -783,6 +784,7 @@ function useLiveOrders() {
       total: Number(payload.total ?? 0),
       remainingTotal: Number(payload.remainingTotal ?? 0),
       method: payload.method ?? method,
+      autoClosed: Boolean(payload.autoClosed),
     };
   };
 
@@ -1235,6 +1237,7 @@ function TableAccountModal({
     total: number;
     remainingTotal: number;
     method: PaymentMethod;
+    autoClosed: boolean;
   }>;
   onCloseAccount: () => Promise<void>;
 }) {
@@ -1344,6 +1347,10 @@ function TableAccountModal({
     try {
       const result = await onTakePayment(paymentSelections, paymentMethod);
       setSelections({});
+      if (result.autoClosed) {
+        onClose();
+        return;
+      }
       setPaymentNotice(
         `${money(result.total)} ${
           result.method === "cash" ? "nakit" : "kart"

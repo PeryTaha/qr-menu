@@ -164,14 +164,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const paymentId = crypto.randomUUID();
-    await env.DB.prepare(
-      `INSERT INTO payments (id, table_no, allocations, total, method)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-      .bind(paymentId, tableNo, JSON.stringify(allocations), total, method)
-      .run();
-
     const accountTotal = Array.from(orders.values()).reduce(
       (sum, order) => sum + order.total,
       0,
@@ -188,13 +180,32 @@ export async function POST(request: Request) {
       },
       0,
     );
+    const remainingTotal = Math.max(0, accountTotal - paidBefore - total);
+    const autoClosed = remainingTotal === 0;
+    const paymentId = crypto.randomUUID();
+    const insertPayment = env.DB.prepare(
+      `INSERT INTO payments (id, table_no, allocations, total, method)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).bind(paymentId, tableNo, JSON.stringify(allocations), total, method);
+
+    if (autoClosed) {
+      await env.DB.batch([
+        insertPayment,
+        env.DB.prepare(
+          "UPDATE orders SET status = 'closed' WHERE table_no = ? AND status != 'closed'",
+        ).bind(tableNo),
+      ]);
+    } else {
+      await insertPayment.run();
+    }
 
     return Response.json(
       {
         paymentId,
         total,
         method,
-        remainingTotal: Math.max(0, accountTotal - paidBefore - total),
+        remainingTotal,
+        autoClosed,
       },
       { status: 201 },
     );
