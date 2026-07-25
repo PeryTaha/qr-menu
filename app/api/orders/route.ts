@@ -126,16 +126,17 @@ export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as {
       tableNo?: number;
-      items?: OrderItem[];
+      items?: Array<{ id?: number; quantity?: number }>;
       note?: string;
     };
     const tableNo = Number(payload.tableNo);
-    const items = Array.isArray(payload.items)
+    const requestedItems = Array.isArray(payload.items)
       ? payload.items.filter(
           (item) =>
+            Number.isInteger(item.id) &&
             Number.isInteger(item.quantity) &&
-            item.quantity > 0 &&
-            Number.isFinite(item.price),
+            Number(item.quantity) > 0 &&
+            Number(item.quantity) <= 20,
         )
       : [];
 
@@ -145,11 +146,52 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    if (!items.length) {
+    if (!requestedItems.length || requestedItems.length > 50) {
       return Response.json({ error: "Sepet boş." }, { status: 400 });
     }
 
     await ensureAppSchema();
+    const quantities = new Map<number, number>();
+    for (const item of requestedItems) {
+      const id = Number(item.id);
+      quantities.set(id, (quantities.get(id) ?? 0) + Number(item.quantity));
+    }
+    if (Array.from(quantities.values()).some((quantity) => quantity > 20)) {
+      return Response.json(
+        { error: "Bir üründen en fazla 20 adet sipariş verilebilir." },
+        { status: 400 },
+      );
+    }
+
+    const ids = Array.from(quantities.keys());
+    const menuResult = await env.DB.prepare(
+      `SELECT id, name, price
+       FROM menu_items
+       WHERE available = 1 AND id IN (${ids.map(() => "?").join(", ")})`,
+    )
+      .bind(...ids)
+      .all();
+    const menuById = new Map(
+      menuResult.results.map((item) => [
+        Number(item.id),
+        {
+          id: Number(item.id),
+          name: String(item.name),
+          price: Number(item.price),
+        },
+      ]),
+    );
+    if (menuById.size !== ids.length) {
+      return Response.json(
+        { error: "Sepette satıştan kaldırılmış bir ürün var. Menüyü yenileyin." },
+        { status: 409 },
+      );
+    }
+    const items: OrderItem[] = ids.map((id) => ({
+      ...menuById.get(id)!,
+      quantity: quantities.get(id)!,
+    }));
+
     const id = crypto.randomUUID();
     const total = items.reduce(
       (sum, item) => sum + item.price * item.quantity,

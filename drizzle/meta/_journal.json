@@ -15,6 +15,13 @@
       "when": 1785006303386,
       "tag": "0001_wandering_rick_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785007155365,
+      "tag": "0002_fearless_natasha_romanoff",
+      "breakpoints": true
     }
   ]
 }

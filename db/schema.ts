@@ -19,3 +19,16 @@ export const payments = sqliteTable("payments", {
   method: text("method").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const menuItems = sqliteTable("menu_items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  category: text("category").notNull(),
+  price: integer("price").notNull(),
+  emoji: text("emoji").notNull().default("☕"),
+  popular: integer("popular", { mode: "boolean" }).notNull().default(false),
+  available: integer("available", { mode: "boolean" }).notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

@@ -18,6 +18,8 @@ type MenuItem = {
   price: number;
   emoji: string;
   popular?: boolean;
+  available?: boolean;
+  sortOrder?: number;
 };
 
 type CartItem = MenuItem & { quantity: number };
@@ -48,9 +50,9 @@ type PaymentSelection = {
   quantity: number;
 };
 
-type View = "menu" | "cashier" | "kitchen" | "qr";
+type View = "menu" | "cashier" | "kitchen" | "qr" | "menuEditor";
 
-const menuItems: MenuItem[] = [
+const fallbackMenuItems: MenuItem[] = [
   {
     id: 1,
     name: "Espresso",
@@ -209,14 +211,6 @@ const menuItems: MenuItem[] = [
   },
 ];
 
-const categories = [
-  "Tümü",
-  "Sıcak Kahveler",
-  "Soğuk Kahveler",
-  "Özel İçecekler",
-  "Tatlılar",
-];
-
 const statusText: Record<Order["status"], string> = {
   new: "Sipariş alındı",
   preparing: "Hazırlanıyor",
@@ -241,6 +235,7 @@ function readView(): View {
   if (view === "kasa") return "cashier";
   if (view === "mutfak") return "kitchen";
   if (view === "qr") return "qr";
+  if (view === "menu-yonetimi") return "menuEditor";
   return "menu";
 }
 
@@ -256,6 +251,9 @@ export function MenuSystem() {
   const [view, setView] = useState<View>(readView);
   const [tableNo] = useState(readTableNo);
   const [category, setCategory] = useState("Tümü");
+  const [menuItems, setMenuItems] =
+    useState<MenuItem[]>(fallbackMenuItems);
+  const [menuError, setMenuError] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -263,12 +261,43 @@ export function MenuSystem() {
   const [confirmedOrder, setConfirmedOrder] = useState<string | null>(null);
   const [statusRefreshKey, setStatusRefreshKey] = useState(0);
 
+  const loadPublicMenu = useCallback(async () => {
+    try {
+      const response = await fetch("/api/menu", { cache: "no-store" });
+      const payload = (await response.json()) as {
+        items?: MenuItem[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "Menü alınamadı.");
+      }
+      setMenuItems(payload.items ?? []);
+      setMenuError("");
+    } catch (error) {
+      setMenuError(
+        error instanceof Error ? error.message : "Menü şu anda alınamıyor.",
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(loadPublicMenu, 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [loadPublicMenu]);
+
+  const categories = useMemo(
+    () => ["Tümü", ...Array.from(new Set(menuItems.map((item) => item.category)))],
+    [menuItems],
+  );
+  const resolvedCategory = categories.includes(category) ? category : "Tümü";
+
   const navigate = (next: View) => {
     const urls: Record<View, string> = {
       menu: `?table=${tableNo}`,
       cashier: "?view=kasa",
       kitchen: "?view=mutfak",
       qr: "?view=qr",
+      menuEditor: "?view=menu-yonetimi",
     };
     window.history.pushState({}, "", urls[next]);
     setView(next);
@@ -310,10 +339,8 @@ export function MenuSystem() {
         body: JSON.stringify({
           tableNo,
           note,
-          items: cart.map(({ id, name, price, quantity }) => ({
+          items: cart.map(({ id, quantity }) => ({
             id,
-            name,
-            price,
             quantity,
           })),
         }),
@@ -355,11 +382,21 @@ export function MenuSystem() {
       </StaffGate>
     );
   }
+  if (view === "menuEditor") {
+    return (
+      <StaffGate onBack={() => navigate("menu")}>
+        <MenuEditorScreen
+          onNavigate={navigate}
+          onMenuChanged={loadPublicMenu}
+        />
+      </StaffGate>
+    );
+  }
 
   const visibleItems =
-    category === "Tümü"
+    resolvedCategory === "Tümü"
       ? menuItems
-      : menuItems.filter((item) => item.category === category);
+      : menuItems.filter((item) => item.category === resolvedCategory);
 
   return (
     <main className="guest-app">
@@ -387,7 +424,7 @@ export function MenuSystem() {
         {categories.map((item) => (
           <button
             key={item}
-            className={category === item ? "active" : ""}
+            className={resolvedCategory === item ? "active" : ""}
             onClick={() => setCategory(item)}
           >
             {item}
@@ -417,11 +454,12 @@ export function MenuSystem() {
         <div className="menu-title-row">
           <div>
             <p>MENÜ</p>
-            <h2>{category}</h2>
+            <h2>{resolvedCategory}</h2>
           </div>
           <span>{visibleItems.length} ürün</span>
         </div>
 
+        {menuError && <div className="menu-load-error">{menuError}</div>}
         <div className="typographic-menu">
           {visibleItems.map((item) => (
             <article className="coffee-item" key={item.id}>
@@ -890,7 +928,7 @@ function ManagementSidebar({
   active,
   onNavigate,
 }: {
-  active: "cashier" | "kitchen" | "qr";
+  active: "cashier" | "kitchen" | "qr" | "menuEditor";
   onNavigate: (view: View) => void;
 }) {
   return (
@@ -918,8 +956,14 @@ function ManagementSidebar({
         >
           <span>⌗</span> Masa QR kodları
         </button>
+        <button
+          className={active === "menuEditor" ? "active" : ""}
+          onClick={() => onNavigate("menuEditor")}
+        >
+          <span>✎</span> Menü yönetimi
+        </button>
         <button onClick={() => onNavigate("menu")}>
-          <span>☕</span> Müşteri menüsü
+          <span>☕</span> Müşteri görünümü
         </button>
       </nav>
       <div className="admin-profile">
@@ -1211,6 +1255,9 @@ function TableAccountModal({
     (sum, order) => sum + (order.remainingTotal ?? order.total),
     0,
   );
+  const unpaidOrders = orders.filter(
+    (order) => (order.remainingTotal ?? order.total) > 0,
+  );
   const remainingItemCount = orders.reduce(
     (sum, order) =>
       sum +
@@ -1322,18 +1369,18 @@ function TableAccountModal({
             <p>MASA HESABI</p>
             <h2>Masa {String(tableNo).padStart(2, "0")}</h2>
             <span>
-              {orders.length} sipariş · {remainingItemCount} ödenmemiş ürün
+              {unpaidOrders.length} açık sipariş · {remainingItemCount} ürün
             </span>
           </div>
           <button onClick={onClose} aria-label="Masa hesabını kapat">×</button>
         </header>
 
         <div className="table-order-history">
-          {orders.map((order, index) => (
+          {unpaidOrders.map((order, index) => (
             <article key={order.id}>
               <div className="table-history-head">
                 <div>
-                  <strong>Sipariş {orders.length - index}</strong>
+                  <strong>Sipariş {unpaidOrders.length - index}</strong>
                   <small>
                     {formatTime(order.createdAt)} · #
                     {order.id.slice(0, 6).toUpperCase()}
@@ -1344,7 +1391,12 @@ function TableAccountModal({
                 </span>
               </div>
               <div className="table-history-items">
-                {order.items.map((item) => {
+                {order.items
+                  .filter(
+                    (item) =>
+                      item.quantity - paidQuantity(order, item.id) > 0,
+                  )
+                  .map((item) => {
                   const paid = paidQuantity(order, item.id);
                   const unpaid = Math.max(0, item.quantity - paid);
                   const key = selectionKey(order.id, item.id);
@@ -1352,14 +1404,13 @@ function TableAccountModal({
                   return (
                     <div
                       className={`payment-item-row ${
-                        !unpaid ? "paid" : selected ? "selected" : ""
+                        selected ? "selected" : ""
                       }`}
                       key={item.id}
                     >
                       <button
                         className="payment-item-toggle"
                         type="button"
-                        disabled={!unpaid}
                         onClick={() =>
                           setSelectedQuantity(
                             order,
@@ -1368,7 +1419,7 @@ function TableAccountModal({
                           )
                         }
                       >
-                        <i>{!unpaid ? "✓" : selected ? "✓" : ""}</i>
+                        <i>{selected ? "✓" : ""}</i>
                         <span>
                           <strong>{item.name}</strong>
                           <small>
@@ -1412,7 +1463,7 @@ function TableAccountModal({
                       )}
                       <div className="payment-line-price">
                         <strong>{money(item.price * unpaid)}</strong>
-                        <small>{unpaid ? `${unpaid} kalan` : "Ödendi"}</small>
+                        <small>{unpaid} kalan</small>
                       </div>
                     </div>
                   );
@@ -1693,6 +1744,383 @@ function KitchenScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
           <strong>{clock}</strong>
         </footer>
       </section>
+    </main>
+  );
+}
+
+type MenuDraft = {
+  id: number;
+  name: string;
+  description: string;
+  category: string;
+  price: number;
+  emoji: string;
+  popular: boolean;
+  available: boolean;
+  sortOrder: number;
+};
+
+function MenuEditorScreen({
+  onNavigate,
+  onMenuChanged,
+}: {
+  onNavigate: (view: View) => void;
+  onMenuChanged: () => Promise<void>;
+}) {
+  const [items, setItems] = useState<MenuDraft[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [draft, setDraft] = useState<MenuDraft | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const loadMenu = useCallback(async () => {
+    try {
+      const response = await fetch("/api/menu?admin=1", {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as {
+        items?: MenuDraft[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "Menü alınamadı.");
+      }
+      setItems(payload.items ?? []);
+      setError("");
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Menü şu anda alınamıyor.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(loadMenu, 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [loadMenu]);
+
+  const categories = Array.from(
+    new Set(items.map((item) => item.category)),
+  );
+
+  const refreshMenus = async () => {
+    await Promise.all([loadMenu(), onMenuChanged()]);
+  };
+
+  const saveDraft = async () => {
+    if (
+      !draft ||
+      !draft.name.trim() ||
+      !draft.category.trim() ||
+      draft.price < 0 ||
+      saving
+    ) {
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/menu", {
+        method: draft.id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Ürün kaydedilemedi.");
+      }
+      setDraft(null);
+      await refreshMenus();
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Ürün kaydedilemedi.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleAvailability = async (item: MenuDraft) => {
+    setError("");
+    try {
+      const response = await fetch("/api/menu", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...item, available: !item.available }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Ürün durumu değiştirilemedi.");
+      }
+      await refreshMenus();
+    } catch (toggleError) {
+      setError(
+        toggleError instanceof Error
+          ? toggleError.message
+          : "Ürün durumu değiştirilemedi.",
+      );
+    }
+  };
+
+  const deleteItem = async (item: MenuDraft) => {
+    if (!window.confirm(`${item.name} menüden kalıcı olarak silinsin mi?`)) {
+      return;
+    }
+    setError("");
+    try {
+      const response = await fetch(`/api/menu?id=${item.id}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Ürün silinemedi.");
+      }
+      await refreshMenus();
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Ürün silinemedi.",
+      );
+    }
+  };
+
+  return (
+    <main className="management-shell">
+      <ManagementSidebar active="menuEditor" onNavigate={onNavigate} />
+      <section className="admin-main menu-editor-main">
+        <header className="admin-topbar menu-editor-header">
+          <div>
+            <p>MÜŞTERİ MENÜSÜ</p>
+            <h1>Menü Yönetimi</h1>
+          </div>
+          <button
+            className="add-menu-item-button"
+            onClick={() =>
+              setDraft({
+                id: 0,
+                name: "",
+                description: "",
+                category: categories[0] ?? "Sıcak Kahveler",
+                price: 0,
+                emoji: "☕",
+                popular: false,
+                available: true,
+                sortOrder: items.length + 1,
+              })
+            }
+          >
+            <span>＋</span> Yeni ürün ekle
+          </button>
+        </header>
+
+        <section className="menu-editor-overview">
+          <div>
+            <span>TOPLAM ÜRÜN</span>
+            <strong>{items.length}</strong>
+          </div>
+          <div>
+            <span>SATIŞTA</span>
+            <strong>{items.filter((item) => item.available).length}</strong>
+          </div>
+          <div>
+            <span>KATEGORİ</span>
+            <strong>{categories.length}</strong>
+          </div>
+          <p>
+            Buradaki değişiklikler masalardaki QR menüye anında yansır.
+          </p>
+        </section>
+
+        {error && <div className="admin-error">{error}</div>}
+        <section className="menu-editor-grid" aria-live="polite">
+          {!items.length && (
+            <div className="admin-empty">
+              <span>☕</span>
+              <strong>{loading ? "Menü yükleniyor…" : "Menü boş"}</strong>
+              <p>Yeni ürün ekleyerek müşteri menüsünü oluşturun.</p>
+            </div>
+          )}
+          {items.map((item) => (
+            <article
+              className={!item.available ? "menu-editor-item unavailable" : ""}
+              key={item.id}
+            >
+              <header>
+                <span>{item.emoji}</span>
+                <div>
+                  <small>{item.category}</small>
+                  <h2>{item.name}</h2>
+                </div>
+                {item.popular && <b>Popüler</b>}
+              </header>
+              <p>{item.description || "Ürün açıklaması bulunmuyor."}</p>
+              <div className="menu-editor-item-price">
+                <strong>{money(item.price)}</strong>
+                <span className={item.available ? "available" : ""}>
+                  {item.available ? "Satışta" : "Satış dışı"}
+                </span>
+              </div>
+              <footer>
+                <button onClick={() => setDraft({ ...item })}>Düzenle</button>
+                <button onClick={() => toggleAvailability(item)}>
+                  {item.available ? "Satıştan kaldır" : "Satışa aç"}
+                </button>
+                <button
+                  className="delete-menu-item"
+                  onClick={() => deleteItem(item)}
+                  aria-label={`${item.name} ürününü sil`}
+                >
+                  ×
+                </button>
+              </footer>
+            </article>
+          ))}
+        </section>
+      </section>
+
+      {draft && (
+        <div
+          className="menu-editor-backdrop"
+          onClick={() => !saving && setDraft(null)}
+        >
+          <aside
+            className="menu-editor-drawer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <p>{draft.id ? "ÜRÜNÜ DÜZENLE" : "YENİ ÜRÜN"}</p>
+                <h2>{draft.id ? draft.name : "Menüye ürün ekle"}</h2>
+              </div>
+              <button
+                disabled={saving}
+                onClick={() => setDraft(null)}
+                aria-label="Ürün düzenleyiciyi kapat"
+              >
+                ×
+              </button>
+            </header>
+            <div className="menu-editor-form">
+              <div className="menu-form-pair emoji-name">
+                <label>
+                  <span>Emoji</span>
+                  <input
+                    value={draft.emoji}
+                    maxLength={8}
+                    onChange={(event) =>
+                      setDraft({ ...draft, emoji: event.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Ürün adı</span>
+                  <input
+                    value={draft.name}
+                    maxLength={80}
+                    placeholder="Örn. Vanilyalı Latte"
+                    onChange={(event) =>
+                      setDraft({ ...draft, name: event.target.value })
+                    }
+                  />
+                </label>
+              </div>
+              <label>
+                <span>Açıklama</span>
+                <textarea
+                  value={draft.description}
+                  maxLength={240}
+                  placeholder="Müşterinin göreceği kısa açıklama"
+                  onChange={(event) =>
+                    setDraft({ ...draft, description: event.target.value })
+                  }
+                />
+              </label>
+              <div className="menu-form-pair">
+                <label>
+                  <span>Kategori</span>
+                  <input
+                    list="menu-categories"
+                    value={draft.category}
+                    maxLength={50}
+                    onChange={(event) =>
+                      setDraft({ ...draft, category: event.target.value })
+                    }
+                  />
+                  <datalist id="menu-categories">
+                    {categories.map((category) => (
+                      <option value={category} key={category} />
+                    ))}
+                  </datalist>
+                </label>
+                <label>
+                  <span>Fiyat (₺)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={draft.price / 100}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        price: Math.round(
+                          Math.max(0, Number(event.target.value)) * 100,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="menu-editor-switches">
+                <button
+                  className={draft.available ? "active" : ""}
+                  type="button"
+                  onClick={() =>
+                    setDraft({ ...draft, available: !draft.available })
+                  }
+                >
+                  <i>{draft.available ? "✓" : ""}</i>
+                  <span>
+                    <strong>Satışta</strong>
+                    <small>QR menüde göster</small>
+                  </span>
+                </button>
+                <button
+                  className={draft.popular ? "active" : ""}
+                  type="button"
+                  onClick={() =>
+                    setDraft({ ...draft, popular: !draft.popular })
+                  }
+                >
+                  <i>{draft.popular ? "✓" : ""}</i>
+                  <span>
+                    <strong>Popüler</strong>
+                    <small>Öne çıkan olarak işaretle</small>
+                  </span>
+                </button>
+              </div>
+            </div>
+            <button
+              className="save-menu-item-button"
+              disabled={
+                saving ||
+                !draft.name.trim() ||
+                !draft.category.trim() ||
+                draft.price < 0
+              }
+              onClick={saveDraft}
+            >
+              {saving ? "Kaydediliyor…" : "Ürünü kaydet"}
+            </button>
+          </aside>
+        </div>
+      )}
     </main>
   );
 }
