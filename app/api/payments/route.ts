@@ -194,6 +194,9 @@ export async function POST(request: Request) {
         env.DB.prepare(
           "UPDATE orders SET status = 'closed' WHERE table_no = ? AND status != 'closed'",
         ).bind(tableNo),
+        env.DB.prepare(
+          "UPDATE table_sessions SET active = 0 WHERE table_no = ?",
+        ).bind(tableNo),
       ]);
     } else {
       await insertPayment.run();

@@ -32,3 +32,14 @@ export const menuItems = sqliteTable("menu_items", {
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const tableSessions = sqliteTable("table_sessions", {
+  tableNo: integer("table_no").primaryKey(),
+  token: text("token").notNull().unique(),
+  accessCode: text("access_code").notNull(),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  lockedUntil: text("locked_until"),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

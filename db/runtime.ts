@@ -51,6 +51,21 @@ export async function ensureAppSchema() {
     db.prepare(
       "CREATE INDEX IF NOT EXISTS menu_items_sort_idx ON menu_items (sort_order, id)",
     ),
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS table_sessions (
+        table_no INTEGER PRIMARY KEY,
+        token TEXT NOT NULL UNIQUE,
+        access_code TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        failed_attempts INTEGER NOT NULL DEFAULT 0,
+        locked_until TEXT,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`,
+    ),
+    db.prepare(
+      "CREATE INDEX IF NOT EXISTS table_sessions_active_idx ON table_sessions (active, expires_at)",
+    ),
   ]);
 
   const seedState = await db
