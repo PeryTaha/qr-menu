@@ -22,7 +22,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol =
     requestHeaders.get("x-forwarded-proto") ??
     (host.includes("localhost") ? "http" : "https");
-  const imageUrl = `${protocol}://${host}/og-v3.png`;
+  const imageUrl = `${protocol}://${host}/og-v4.png`;
   const title = "masa. | Dijital Menü ve Sipariş";
   const description =
     "Masaya özel QR menü, mobil sipariş, yönetim paneli ve mutfak ekranı.";
@@ -33,7 +33,7 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       title,
       description,
-      images: [{ url: imageUrl, width: 1737, height: 909, alt: title }],
+      images: [{ url: imageUrl, width: 1731, height: 909, alt: title }],
     },
     twitter: {
       card: "summary_large_image",

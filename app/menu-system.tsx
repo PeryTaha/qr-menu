@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import QRCode from "qrcode";
 
 type MenuItem = {
@@ -223,9 +230,17 @@ function readView(): View {
   return "menu";
 }
 
+function readTableNo() {
+  if (typeof window === "undefined") return 5;
+  const parsedTable = Number(
+    new URLSearchParams(window.location.search).get("table"),
+  );
+  return Number.isInteger(parsedTable) && parsedTable > 0 ? parsedTable : 5;
+}
+
 export function MenuSystem() {
   const [view, setView] = useState<View>(readView);
-  const [tableNo, setTableNo] = useState(5);
+  const [tableNo] = useState(readTableNo);
   const [category, setCategory] = useState("Tümü");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
@@ -233,12 +248,6 @@ export function MenuSystem() {
   const [placing, setPlacing] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<string | null>(null);
   const [statusRefreshKey, setStatusRefreshKey] = useState(0);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const parsedTable = Number(params.get("table"));
-    if (Number.isInteger(parsedTable) && parsedTable > 0) setTableNo(parsedTable);
-  }, []);
 
   const navigate = (next: View) => {
     const urls: Record<View, string> = {
@@ -311,9 +320,27 @@ export function MenuSystem() {
     }
   };
 
-  if (view === "cashier") return <CashierScreen onNavigate={navigate} />;
-  if (view === "kitchen") return <KitchenScreen onNavigate={navigate} />;
-  if (view === "qr") return <QrScreen onNavigate={navigate} />;
+  if (view === "cashier") {
+    return (
+      <StaffGate onBack={() => navigate("menu")}>
+        <CashierScreen onNavigate={navigate} />
+      </StaffGate>
+    );
+  }
+  if (view === "kitchen") {
+    return (
+      <StaffGate onBack={() => navigate("menu")}>
+        <KitchenScreen onNavigate={navigate} />
+      </StaffGate>
+    );
+  }
+  if (view === "qr") {
+    return (
+      <StaffGate onBack={() => navigate("menu")}>
+        <QrScreen onNavigate={navigate} />
+      </StaffGate>
+    );
+  }
 
   const visibleItems =
     category === "Tümü"
@@ -328,14 +355,10 @@ export function MenuSystem() {
           <small>KAHVE &amp; MUTFAK</small>
         </button>
         <div className="guest-top-actions">
-          <button
-            className="table-label"
-            onClick={() => navigate("qr")}
-            aria-label={`Masa ${tableNo} QR kodları`}
-          >
+          <div className="table-label" aria-label={`Masa ${tableNo}`}>
             <span>Masa</span>
             <strong>{String(tableNo).padStart(2, "0")}</strong>
-          </button>
+          </div>
           <button
             className="round-admin-button"
             onClick={() => navigate("cashier")}
@@ -641,9 +664,12 @@ function useLiveOrders() {
   }, []);
 
   useEffect(() => {
-    reload();
+    const initialLoad = window.setTimeout(reload, 0);
     const timer = window.setInterval(reload, 4000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(timer);
+    };
   }, [reload]);
 
   const updateStatus = async (id: string, status: Order["status"]) => {
@@ -686,6 +712,133 @@ function useLiveOrders() {
     updateStatus,
     closeTable,
   };
+}
+
+function StaffGate({
+  children,
+  onBack,
+}: {
+  children: ReactNode;
+  onBack: () => void;
+}) {
+  const [authenticated, setAuthenticated] = useState(false);
+  const [checking, setChecking] = useState(true);
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/staff-auth", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload: { authenticated?: boolean }) => {
+        if (active) setAuthenticated(Boolean(payload.authenticated));
+      })
+      .catch(() => {
+        if (active) setAuthenticated(false);
+      })
+      .finally(() => {
+        if (active) setChecking(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const signIn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch("/api/staff-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin }),
+      });
+      const payload = (await response.json()) as {
+        authenticated?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.authenticated) {
+        throw new Error(payload.error || "Giriş yapılamadı.");
+      }
+      setPin("");
+      setAuthenticated(true);
+    } catch (signInError) {
+      setError(
+        signInError instanceof Error
+          ? signInError.message
+          : "Giriş yapılamadı.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (checking) {
+    return (
+      <main className="staff-gate">
+        <div className="staff-gate-card staff-gate-loading">
+          <span className="staff-shield">●</span>
+          <strong>Personel oturumu kontrol ediliyor…</strong>
+        </div>
+      </main>
+    );
+  }
+
+  if (!authenticated) {
+    return (
+      <main className="staff-gate">
+        <form className="staff-gate-card" onSubmit={signIn}>
+          <div className="staff-gate-brand">
+            <strong>
+              masa<span>.</span>
+            </strong>
+            <small>PERSONEL GİRİŞİ</small>
+          </div>
+          <span className="staff-shield">⌾</span>
+          <p>Bu ekran yalnızca kasa ve mutfak personeline açıktır.</p>
+          <label htmlFor="staff-pin">Personel PIN kodu</label>
+          <input
+            id="staff-pin"
+            inputMode="numeric"
+            autoComplete="current-password"
+            maxLength={6}
+            pattern="[0-9]{6}"
+            placeholder="••••••"
+            value={pin}
+            onChange={(event) =>
+              setPin(event.target.value.replace(/\D/g, "").slice(0, 6))
+            }
+            autoFocus
+          />
+          {error && <div className="staff-gate-error">{error}</div>}
+          <button type="submit" disabled={pin.length !== 6 || submitting}>
+            {submitting ? "Kontrol ediliyor…" : "Panele giriş yap"}
+          </button>
+          <button className="staff-gate-back" type="button" onClick={onBack}>
+            Müşteri menüsüne dön
+          </button>
+        </form>
+      </main>
+    );
+  }
+
+  return (
+    <>
+      {children}
+      <button
+        className="staff-sign-out"
+        onClick={async () => {
+          await fetch("/api/staff-auth", { method: "DELETE" });
+          setAuthenticated(false);
+        }}
+      >
+        Personel çıkışı
+      </button>
+    </>
+  );
 }
 
 function ManagementSidebar({
@@ -944,6 +1097,7 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
           tableNo={selectedTable}
           orders={selectedOrders}
           onClose={() => setSelectedTable(null)}
+          onUpdateStatus={updateStatus}
           onCloseAccount={async () => {
             const closed = await closeTable(selectedTable);
             if (closed) setSelectedTable(null);
@@ -958,11 +1112,13 @@ function TableAccountModal({
   tableNo,
   orders,
   onClose,
+  onUpdateStatus,
   onCloseAccount,
 }: {
   tableNo: number;
   orders: Order[];
   onClose: () => void;
+  onUpdateStatus: (id: string, status: Order["status"]) => void;
   onCloseAccount: () => Promise<void>;
 }) {
   const [confirmClose, setConfirmClose] = useState(false);
@@ -1025,6 +1181,11 @@ function TableAccountModal({
                 <span>Sipariş toplamı</span>
                 <strong>{money(order.total)}</strong>
               </footer>
+              {order.status !== "served" && order.status !== "closed" && (
+                <div className={`table-history-action status-${order.status}`}>
+                  <OrderAction order={order} onUpdate={onUpdateStatus} />
+                </div>
+              )}
             </article>
           ))}
         </div>
@@ -1074,6 +1235,7 @@ function OrderAction({
   order: Order;
   onUpdate: (id: string, status: Order["status"]) => void;
 }) {
+  if (order.status === "served" || order.status === "closed") return null;
   if (order.status === "new") {
     return (
       <button

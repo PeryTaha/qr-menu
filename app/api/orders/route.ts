@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { isStaffRequest } from "@/app/staff-auth";
 
 type OrderItem = {
   id: number;
@@ -45,6 +46,12 @@ export async function GET(request: Request) {
     const requestedTable = Number(url.searchParams.get("table"));
     const hasTableFilter =
       Number.isInteger(requestedTable) && requestedTable > 0;
+    if (!hasTableFilter && !(await isStaffRequest(request))) {
+      return Response.json(
+        { error: "Personel oturumu gerekli." },
+        { status: 401 },
+      );
+    }
     const query = hasTableFilter
       ? env.DB.prepare(
           `SELECT id, table_no AS tableNo, status, items, note, total,
@@ -131,6 +138,12 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
+    if (!(await isStaffRequest(request))) {
+      return Response.json(
+        { error: "Bu işlem yalnızca personel tarafından yapılabilir." },
+        { status: 401 },
+      );
+    }
     const payload = (await request.json()) as {
       id?: string;
       tableNo?: number;
