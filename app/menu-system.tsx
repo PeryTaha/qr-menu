@@ -34,7 +34,18 @@ type Order = {
   }>;
   note: string;
   total: number;
+  paidItems: Record<string, number>;
+  paidTotal: number;
+  remainingTotal: number;
   createdAt: string;
+};
+
+type PaymentMethod = "cash" | "card";
+
+type PaymentSelection = {
+  orderId: string;
+  itemId: number;
+  quantity: number;
 };
 
 type View = "menu" | "cashier" | "kitchen" | "qr";
@@ -220,6 +231,9 @@ const money = (value: number) =>
     currency: "TRY",
     maximumFractionDigits: 0,
   }).format(value / 100);
+
+const paidQuantity = (order: Order, itemId: number) =>
+  Number(order.paidItems?.[String(itemId)] ?? 0);
 
 function readView(): View {
   if (typeof window === "undefined") return "menu";
@@ -575,7 +589,10 @@ function CustomerOrderStatus({
 
   if (!orders.length && !error) return null;
 
-  const tableTotal = orders.reduce((sum, order) => sum + order.total, 0);
+  const tableTotal = orders.reduce(
+    (sum, order) => sum + (order.remainingTotal ?? order.total),
+    0,
+  );
   const steps = [
     { status: "new", label: "Alındı" },
     { status: "preparing", label: "Hazırlanıyor" },
@@ -598,7 +615,7 @@ function CustomerOrderStatus({
           <h2>Masa {String(tableNo).padStart(2, "0")} hesabı</h2>
         </div>
         <div className="customer-account-total">
-          <span>Güncel hesap</span>
+          <span>Kalan hesap</span>
           <strong>{money(tableTotal)}</strong>
         </div>
       </header>
@@ -615,7 +632,7 @@ function CustomerOrderStatus({
                 </div>
                 <div>
                   <strong>{statusText[order.status]}</strong>
-                  <small>{money(order.total)}</small>
+                  <small>{money(order.remainingTotal ?? order.total)}</small>
                 </div>
               </div>
               <div className="status-timeline">
@@ -704,6 +721,33 @@ function useLiveOrders() {
     return false;
   };
 
+  const takePayment = async (
+    tableNo: number,
+    selections: PaymentSelection[],
+    method: PaymentMethod,
+  ) => {
+    const response = await fetch("/api/payments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tableNo, selections, method }),
+    });
+    const payload = (await response.json()) as {
+      total?: number;
+      remainingTotal?: number;
+      method?: PaymentMethod;
+      error?: string;
+    };
+    if (!response.ok) {
+      throw new Error(payload.error || "Ödeme alınamadı.");
+    }
+    await reload();
+    return {
+      total: Number(payload.total ?? 0),
+      remainingTotal: Number(payload.remainingTotal ?? 0),
+      method: payload.method ?? method,
+    };
+  };
+
   return {
     orders,
     loading,
@@ -711,6 +755,7 @@ function useLiveOrders() {
     reload,
     updateStatus,
     closeTable,
+    takePayment,
   };
 }
 
@@ -896,6 +941,7 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
     reload,
     updateStatus,
     closeTable,
+    takePayment,
   } = useLiveOrders();
   const [selectedTable, setSelectedTable] = useState<number | null>(null);
   const operationalOrders = useMemo(
@@ -903,7 +949,10 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
     [orders],
   );
   const activeTables = new Set(orders.map((order) => order.tableNo)).size;
-  const dailyRevenue = orders.reduce((sum, order) => sum + order.total, 0);
+  const collectedTotal = orders.reduce(
+    (sum, order) => sum + Number(order.paidTotal ?? 0),
+    0,
+  );
   const readyCount = orders.filter((order) => order.status === "ready").length;
   const tableAccounts = useMemo(
     () =>
@@ -915,12 +964,21 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
         return {
           tableNo,
           orders: tableOrders,
-          total: tableOrders.reduce((sum, order) => sum + order.total, 0),
+          total: tableOrders.reduce(
+            (sum, order) => sum + (order.remainingTotal ?? order.total),
+            0,
+          ),
+          paidTotal: tableOrders.reduce(
+            (sum, order) => sum + Number(order.paidTotal ?? 0),
+            0,
+          ),
           itemCount: tableOrders.reduce(
             (sum, order) =>
               sum +
               order.items.reduce(
-                (itemSum, item) => itemSum + item.quantity,
+                (itemSum, item) =>
+                  itemSum +
+                  Math.max(0, item.quantity - paidQuantity(order, item.id)),
                 0,
               ),
             0,
@@ -966,8 +1024,8 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
             <i className="metric-icon orange">◴</i>
           </article>
           <article>
-            <span>AKTİF CİRO</span>
-            <strong>{money(dailyRevenue)}</strong>
+            <span>TAHSİLAT</span>
+            <strong>{money(collectedTotal)}</strong>
             <i className="metric-icon green">₺</i>
           </article>
           <article>
@@ -1005,12 +1063,15 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
                 {account.orders.length ? (
                   <>
                     <div className="table-card-total">
-                      <small>Güncel hesap</small>
+                      <small>Kalan hesap</small>
                       <strong>{money(account.total)}</strong>
+                      {account.paidTotal > 0 && (
+                        <span>{money(account.paidTotal)} ödendi</span>
+                      )}
                     </div>
                     <div className="table-card-foot">
                       <span>{account.orders.length} sipariş</span>
-                      <span>{account.itemCount} ürün</span>
+                      <span>{account.itemCount} ödenmemiş ürün</span>
                       <b>
                         {account.activeStatus
                           ? statusText[account.activeStatus]
@@ -1098,6 +1159,9 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
           orders={selectedOrders}
           onClose={() => setSelectedTable(null)}
           onUpdateStatus={updateStatus}
+          onTakePayment={(selections, method) =>
+            takePayment(selectedTable, selections, method)
+          }
           onCloseAccount={async () => {
             const closed = await closeTable(selectedTable);
             if (closed) setSelectedTable(null);
@@ -1113,26 +1177,139 @@ function TableAccountModal({
   orders,
   onClose,
   onUpdateStatus,
+  onTakePayment,
   onCloseAccount,
 }: {
   tableNo: number;
   orders: Order[];
   onClose: () => void;
   onUpdateStatus: (id: string, status: Order["status"]) => void;
+  onTakePayment: (
+    selections: PaymentSelection[],
+    method: PaymentMethod,
+  ) => Promise<{
+    total: number;
+    remainingTotal: number;
+    method: PaymentMethod;
+  }>;
   onCloseAccount: () => Promise<void>;
 }) {
   const [confirmClose, setConfirmClose] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [selections, setSelections] = useState<Record<string, number>>({});
+  const [paymentMethod, setPaymentMethod] =
+    useState<PaymentMethod>("card");
+  const [paying, setPaying] = useState(false);
+  const [paymentNotice, setPaymentNotice] = useState("");
+  const [paymentError, setPaymentError] = useState("");
   const accountTotal = orders.reduce((sum, order) => sum + order.total, 0);
-  const itemCount = orders.reduce(
+  const paidTotal = orders.reduce(
+    (sum, order) => sum + Number(order.paidTotal ?? 0),
+    0,
+  );
+  const remainingTotal = orders.reduce(
+    (sum, order) => sum + (order.remainingTotal ?? order.total),
+    0,
+  );
+  const remainingItemCount = orders.reduce(
     (sum, order) =>
       sum +
       order.items.reduce(
-        (itemSum, item) => itemSum + item.quantity,
+        (itemSum, item) =>
+          itemSum +
+          Math.max(0, item.quantity - paidQuantity(order, item.id)),
         0,
       ),
     0,
   );
+  const selectionKey = (orderId: string, itemId: number) =>
+    `${orderId}:${itemId}`;
+  const selectedTotal = orders.reduce(
+    (sum, order) =>
+      sum +
+      order.items.reduce(
+        (itemSum, item) =>
+          itemSum +
+          item.price * (selections[selectionKey(order.id, item.id)] ?? 0),
+        0,
+      ),
+    0,
+  );
+  const selectedItemCount = Object.values(selections).reduce(
+    (sum, quantity) => sum + quantity,
+    0,
+  );
+
+  const setSelectedQuantity = (
+    order: Order,
+    itemId: number,
+    quantity: number,
+  ) => {
+    const item = order.items.find((candidate) => candidate.id === itemId);
+    if (!item) return;
+    const maximum = Math.max(
+      0,
+      item.quantity - paidQuantity(order, item.id),
+    );
+    const nextQuantity = Math.max(0, Math.min(maximum, quantity));
+    const key = selectionKey(order.id, item.id);
+    setSelections((current) => {
+      if (!nextQuantity) {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      }
+      return { ...current, [key]: nextQuantity };
+    });
+    setPaymentNotice("");
+    setPaymentError("");
+  };
+
+  const selectAllUnpaid = () => {
+    const next: Record<string, number> = {};
+    for (const order of orders) {
+      for (const item of order.items) {
+        const unpaid = Math.max(
+          0,
+          item.quantity - paidQuantity(order, item.id),
+        );
+        if (unpaid) next[selectionKey(order.id, item.id)] = unpaid;
+      }
+    }
+    setSelections(next);
+    setPaymentNotice("");
+    setPaymentError("");
+  };
+
+  const takeSelectedPayment = async () => {
+    const paymentSelections = orders.flatMap((order) =>
+      order.items.flatMap((item) => {
+        const quantity = selections[selectionKey(order.id, item.id)] ?? 0;
+        return quantity
+          ? [{ orderId: order.id, itemId: item.id, quantity }]
+          : [];
+      }),
+    );
+    if (!paymentSelections.length || paying) return;
+
+    setPaying(true);
+    setPaymentError("");
+    try {
+      const result = await onTakePayment(paymentSelections, paymentMethod);
+      setSelections({});
+      setPaymentNotice(
+        `${money(result.total)} ${
+          result.method === "cash" ? "nakit" : "kart"
+        } ile tahsil edildi. Kalan hesap ${money(result.remainingTotal)}.`,
+      );
+    } catch (error) {
+      setPaymentError(
+        error instanceof Error ? error.message : "Ödeme alınamadı.",
+      );
+    } finally {
+      setPaying(false);
+    }
+  };
 
   return (
     <div className="table-account-backdrop" onClick={onClose}>
@@ -1145,7 +1322,7 @@ function TableAccountModal({
             <p>MASA HESABI</p>
             <h2>Masa {String(tableNo).padStart(2, "0")}</h2>
             <span>
-              {orders.length} sipariş · {itemCount} ürün
+              {orders.length} sipariş · {remainingItemCount} ödenmemiş ürün
             </span>
           </div>
           <button onClick={onClose} aria-label="Masa hesabını kapat">×</button>
@@ -1167,19 +1344,89 @@ function TableAccountModal({
                 </span>
               </div>
               <div className="table-history-items">
-                {order.items.map((item) => (
-                  <div key={item.id}>
-                    <span>
-                      <b>{item.quantity}×</b> {item.name}
-                    </span>
-                    <small>{money(item.price * item.quantity)}</small>
-                  </div>
-                ))}
+                {order.items.map((item) => {
+                  const paid = paidQuantity(order, item.id);
+                  const unpaid = Math.max(0, item.quantity - paid);
+                  const key = selectionKey(order.id, item.id);
+                  const selected = selections[key] ?? 0;
+                  return (
+                    <div
+                      className={`payment-item-row ${
+                        !unpaid ? "paid" : selected ? "selected" : ""
+                      }`}
+                      key={item.id}
+                    >
+                      <button
+                        className="payment-item-toggle"
+                        type="button"
+                        disabled={!unpaid}
+                        onClick={() =>
+                          setSelectedQuantity(
+                            order,
+                            item.id,
+                            selected ? 0 : unpaid,
+                          )
+                        }
+                      >
+                        <i>{!unpaid ? "✓" : selected ? "✓" : ""}</i>
+                        <span>
+                          <strong>{item.name}</strong>
+                          <small>
+                            {paid
+                              ? `${paid}/${item.quantity} adet ödendi`
+                              : `${item.quantity} adet · ${money(item.price)}`
+                            }
+                          </small>
+                        </span>
+                      </button>
+                      {unpaid > 0 && (
+                        <div className="payment-quantity">
+                          <button
+                            type="button"
+                            aria-label={`${item.name} seçimini azalt`}
+                            onClick={() =>
+                              setSelectedQuantity(
+                                order,
+                                item.id,
+                                selected - 1,
+                              )
+                            }
+                          >
+                            −
+                          </button>
+                          <strong>{selected}</strong>
+                          <button
+                            type="button"
+                            aria-label={`${item.name} seçimini artır`}
+                            onClick={() =>
+                              setSelectedQuantity(
+                                order,
+                                item.id,
+                                selected + 1,
+                              )
+                            }
+                          >
+                            +
+                          </button>
+                        </div>
+                      )}
+                      <div className="payment-line-price">
+                        <strong>{money(item.price * unpaid)}</strong>
+                        <small>{unpaid ? `${unpaid} kalan` : "Ödendi"}</small>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
               {order.note && <p>Not: {order.note}</p>}
               <footer>
-                <span>Sipariş toplamı</span>
-                <strong>{money(order.total)}</strong>
+                <span>
+                  Sipariş kalanı
+                  {order.paidTotal > 0 && (
+                    <small> · {money(order.paidTotal)} ödendi</small>
+                  )}
+                </span>
+                <strong>{money(order.remainingTotal ?? order.total)}</strong>
               </footer>
               {order.status !== "served" && order.status !== "closed" && (
                 <div className={`table-history-action status-${order.status}`}>
@@ -1191,18 +1438,88 @@ function TableAccountModal({
         </div>
 
         <div className="table-account-summary">
-          <span>Güncel hesap toplamı</span>
-          <strong>{money(accountTotal)}</strong>
+          <div>
+            <span>Kalan masa hesabı</span>
+            <small>
+              Toplam {money(accountTotal)} · Ödenen {money(paidTotal)}
+            </small>
+          </div>
+          <strong>{money(remainingTotal)}</strong>
         </div>
 
-        {!confirmClose ? (
+        {remainingTotal > 0 ? (
+          <section className="split-payment-panel">
+            <header>
+              <div>
+                <p>ALMAN USULÜ ÖDEME</p>
+                <strong>Ödenecek ürünleri seç</strong>
+              </div>
+              <button type="button" onClick={selectAllUnpaid}>
+                Tümünü seç
+              </button>
+            </header>
+            <p>
+              Bir kişinin ürünlerini ve adetlerini seç; ödeme sonrası yalnızca
+              kalanlar hesapta görünür.
+            </p>
+            <div className="payment-methods">
+              <button
+                className={paymentMethod === "card" ? "active" : ""}
+                type="button"
+                onClick={() => setPaymentMethod("card")}
+              >
+                <span>▣</span> Kart
+              </button>
+              <button
+                className={paymentMethod === "cash" ? "active" : ""}
+                type="button"
+                onClick={() => setPaymentMethod("cash")}
+              >
+                <span>₺</span> Nakit
+              </button>
+            </div>
+            <div className="selected-payment-total">
+              <span>
+                Seçilen tutar
+                <small>{selectedItemCount} ürün/adet</small>
+              </span>
+              <strong>{money(selectedTotal)}</strong>
+            </div>
+            {paymentNotice && (
+              <div className="payment-notice success">✓ {paymentNotice}</div>
+            )}
+            {paymentError && (
+              <div className="payment-notice error">{paymentError}</div>
+            )}
+            <button
+              className="take-payment-button"
+              type="button"
+              disabled={!selectedTotal || paying}
+              onClick={takeSelectedPayment}
+            >
+              {paying
+                ? "Ödeme işleniyor…"
+                : `${money(selectedTotal)} tahsil et`}
+            </button>
+          </section>
+        ) : (
+          <div className="payment-complete">
+            <span>✓</span>
+            <div>
+              <strong>Hesabın tamamı ödendi</strong>
+              <small>Masayı yeni müşteri için kapatabilirsiniz.</small>
+            </div>
+          </div>
+        )}
+
+        {remainingTotal === 0 && !confirmClose ? (
           <button
             className="close-account-button"
             onClick={() => setConfirmClose(true)}
           >
-            Hesabı kapat
+            Ödenen hesabı kapat
           </button>
-        ) : (
+        ) : remainingTotal === 0 ? (
           <div className="close-account-confirm">
             <p>
               Masa {tableNo} hesabı kapatılacak ve yeni müşteri için
@@ -1218,11 +1535,11 @@ function TableAccountModal({
                   setClosing(false);
                 }}
               >
-                {closing ? "Kapatılıyor…" : "Evet, hesabı kapat"}
+                {closing ? "Kapatılıyor…" : "Evet, masayı kapat"}
               </button>
             </div>
           </div>
-        )}
+        ) : null}
       </aside>
     </div>
   );

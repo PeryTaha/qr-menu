@@ -10,3 +10,12 @@ export const orders = sqliteTable("orders", {
   total: integer("total").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const payments = sqliteTable("payments", {
+  id: text("id").primaryKey(),
+  tableNo: integer("table_no").notNull(),
+  allocations: text("allocations").notNull(),
+  total: integer("total").notNull(),
+  method: text("method").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

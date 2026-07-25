@@ -1,10 +1,17 @@
 import { env } from "cloudflare:workers";
 import { isStaffRequest } from "@/app/staff-auth";
+import { ensureAppSchema } from "@/db/runtime";
 
 type OrderItem = {
   id: number;
   name: string;
   price: number;
+  quantity: number;
+};
+
+type PaymentAllocation = {
+  orderId: string;
+  itemId: number;
   quantity: number;
 };
 
@@ -16,32 +23,9 @@ const allowedStatuses = new Set([
   "closed",
 ]);
 
-async function ensureSchema() {
-  const db = env.DB;
-  await db.batch([
-    db.prepare(
-      `CREATE TABLE IF NOT EXISTS orders (
-        id TEXT PRIMARY KEY,
-        table_no INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'new',
-        items TEXT NOT NULL,
-        note TEXT NOT NULL DEFAULT '',
-        total INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`,
-    ),
-    db.prepare(
-      "CREATE INDEX IF NOT EXISTS orders_created_at_idx ON orders (created_at DESC)",
-    ),
-    db.prepare(
-      "CREATE INDEX IF NOT EXISTS orders_status_idx ON orders (status)",
-    ),
-  ]);
-}
-
 export async function GET(request: Request) {
   try {
-    await ensureSchema();
+    await ensureAppSchema();
     const url = new URL(request.url);
     const requestedTable = Number(url.searchParams.get("table"));
     const hasTableFilter =
@@ -71,10 +55,63 @@ export async function GET(request: Request) {
         );
     const result = await query.all();
 
-    const orders = result.results.map((row) => ({
+    const parsedOrders = result.results.map((row) => ({
       ...row,
-      items: JSON.parse(String(row.items)),
+      id: String(row.id),
+      total: Number(row.total),
+      items: JSON.parse(String(row.items)) as OrderItem[],
     }));
+    const activeOrderIds = new Set(parsedOrders.map((order) => order.id));
+    const paymentQuery = hasTableFilter
+      ? env.DB.prepare(
+          `SELECT allocations
+           FROM payments
+           WHERE table_no = ?
+           ORDER BY created_at DESC
+           LIMIT 1000`,
+        ).bind(requestedTable)
+      : env.DB.prepare(
+          `SELECT allocations
+           FROM payments
+           ORDER BY created_at DESC
+           LIMIT 5000`,
+        );
+    const paymentResult = await paymentQuery.all();
+    const paidByOrder = new Map<string, Map<number, number>>();
+
+    for (const row of paymentResult.results) {
+      const allocations = JSON.parse(
+        String(row.allocations),
+      ) as PaymentAllocation[];
+      for (const allocation of allocations) {
+        if (!activeOrderIds.has(allocation.orderId)) continue;
+        const orderPayments =
+          paidByOrder.get(allocation.orderId) ?? new Map<number, number>();
+        orderPayments.set(
+          allocation.itemId,
+          (orderPayments.get(allocation.itemId) ?? 0) + allocation.quantity,
+        );
+        paidByOrder.set(allocation.orderId, orderPayments);
+      }
+    }
+
+    const orders = parsedOrders.map((order) => {
+      const orderPayments = paidByOrder.get(order.id) ?? new Map<number, number>();
+      const paidItems = Object.fromEntries(orderPayments);
+      const paidTotal = order.items.reduce(
+        (sum, item) =>
+          sum +
+          item.price *
+            Math.min(item.quantity, orderPayments.get(item.id) ?? 0),
+        0,
+      );
+      return {
+        ...order,
+        paidItems,
+        paidTotal,
+        remainingTotal: Math.max(0, order.total - paidTotal),
+      };
+    });
 
     return Response.json({ orders });
   } catch (error) {
@@ -112,7 +149,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Sepet boş." }, { status: 400 });
     }
 
-    await ensureSchema();
+    await ensureAppSchema();
     const id = crypto.randomUUID();
     const total = items.reduce(
       (sum, item) => sum + item.price * item.quantity,
@@ -160,7 +197,7 @@ export async function PATCH(request: Request) {
       );
     }
 
-    await ensureSchema();
+    await ensureAppSchema();
     const isTableClose =
       status === "closed" &&
       Number.isInteger(tableNo) &&
@@ -170,6 +207,48 @@ export async function PATCH(request: Request) {
         { error: "Sipariş veya masa numarası gerekli." },
         { status: 400 },
       );
+    }
+
+    if (isTableClose) {
+      const openOrders = await env.DB.prepare(
+        `SELECT id, items, total
+         FROM orders
+         WHERE table_no = ? AND status != 'closed'`,
+      )
+        .bind(tableNo)
+        .all();
+      const payments = await env.DB.prepare(
+        "SELECT allocations FROM payments WHERE table_no = ?",
+      )
+        .bind(tableNo)
+        .all();
+      const activeOrderIds = new Set(
+        openOrders.results.map((order) => String(order.id)),
+      );
+      let paidTotal = 0;
+      for (const payment of payments.results) {
+        const allocations = JSON.parse(
+          String(payment.allocations),
+        ) as Array<PaymentAllocation & { unitPrice?: number }>;
+        for (const allocation of allocations) {
+          if (activeOrderIds.has(allocation.orderId)) {
+            paidTotal += Number(allocation.unitPrice ?? 0) * allocation.quantity;
+          }
+        }
+      }
+      const accountTotal = openOrders.results.reduce(
+        (sum, order) => sum + Number(order.total),
+        0,
+      );
+      if (paidTotal < accountTotal) {
+        return Response.json(
+          {
+            error: "Masa kapatılmadan önce kalan hesabın tamamı ödenmeli.",
+            remainingTotal: accountTotal - paidTotal,
+          },
+          { status: 409 },
+        );
+      }
     }
 
     const result = isTableClose
