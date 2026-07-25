@@ -9,9 +9,8 @@ type MenuItem = {
   description: string;
   category: string;
   price: number;
-  badge?: string;
-  art: string;
   emoji: string;
+  popular?: boolean;
 };
 
 type CartItem = MenuItem & { quantity: number };
@@ -31,94 +30,181 @@ type Order = {
   createdAt: string;
 };
 
-type View = "menu" | "cashier" | "qr";
+type View = "menu" | "cashier" | "kitchen" | "qr";
 
 const menuItems: MenuItem[] = [
   {
     id: 1,
-    name: "İmza Burger",
-    description: "Dana köfte, isli cheddar, karamelize soğan ve ev yapımı sos",
-    category: "Burger",
-    price: 34500,
-    badge: "Çok sevilen",
-    art: "sunset",
-    emoji: "🍔",
+    name: "Espresso",
+    description: "Yoğun, aromatik ve keskin bir kahve.",
+    category: "Sıcak Kahveler",
+    price: 6500,
+    emoji: "☕",
   },
   {
     id: 2,
-    name: "Çıtır Tavuk Burger",
-    description: "Çıtır tavuk, coleslaw, turşu ve ballı hardal",
-    category: "Burger",
-    price: 29500,
-    art: "cream",
-    emoji: "🍗",
+    name: "Double Espresso",
+    description: "Enerjiye ihtiyaç duyanlara ekstra yoğunluk.",
+    category: "Sıcak Kahveler",
+    price: 8000,
+    emoji: "☕",
   },
   {
     id: 3,
-    name: "Füme Etli Pizza",
-    description: "Domates sos, mozzarella, füme et ve roka",
-    category: "Pizza",
-    price: 39000,
-    badge: "Şefin seçimi",
-    art: "red",
-    emoji: "🍕",
+    name: "Americano",
+    description: "Espresso üzerine sıcak su; hafif ama karakterli.",
+    category: "Sıcak Kahveler",
+    price: 7000,
+    emoji: "☕",
   },
   {
     id: 4,
-    name: "Akdeniz Salata",
-    description: "Mevsim yeşillikleri, ezine peyniri, ceviz ve nar ekşisi",
-    category: "Salata",
-    price: 24500,
-    art: "green",
-    emoji: "🥗",
+    name: "Latte",
+    description: "Espresso ve süt kremasının mükemmel dengesi.",
+    category: "Sıcak Kahveler",
+    price: 8500,
+    emoji: "🥛",
+    popular: true,
   },
   {
     id: 5,
-    name: "Trüflü Patates",
-    description: "Parmesan, trüf yağı ve sarımsaklı dip sos",
-    category: "Atıştırmalık",
-    price: 17500,
-    art: "gold",
-    emoji: "🍟",
+    name: "Cappuccino",
+    description: "Bol süt köpüğüyle kahve severlerin vazgeçilmezi.",
+    category: "Sıcak Kahveler",
+    price: 8500,
+    emoji: "☕",
   },
   {
     id: 6,
-    name: "San Sebastian",
-    description: "Akışkan merkezli cheesecake ve bitter çikolata",
-    category: "Tatlı",
-    price: 19500,
-    art: "cocoa",
-    emoji: "🍰",
+    name: "Flat White",
+    description: "Yoğun espresso ve kadifemsi sütün güçlü uyumu.",
+    category: "Sıcak Kahveler",
+    price: 9000,
+    emoji: "🥛",
   },
   {
     id: 7,
-    name: "Ev Yapımı Limonata",
-    description: "Taze limon, nane ve hafif şeker",
-    category: "İçecek",
+    name: "Mocha",
+    description: "Kahve, süt ve çikolatanın tatlı uyumu.",
+    category: "Sıcak Kahveler",
     price: 9500,
-    art: "lemon",
-    emoji: "🍋",
+    emoji: "🍫",
   },
   {
     id: 8,
     name: "Cold Brew",
-    description: "18 saat soğuk demlenmiş özel seri kahve",
-    category: "İçecek",
-    price: 12500,
-    art: "coffee",
-    emoji: "☕",
+    description: "16 saat demlenen, yumuşak içimli ve ferahlatıcı.",
+    category: "Soğuk Kahveler",
+    price: 9500,
+    emoji: "🧊",
+    popular: true,
+  },
+  {
+    id: 9,
+    name: "Iced Americano",
+    description: "Klasik Amerikan kahvesinin buzla buluşmuş serin hali.",
+    category: "Soğuk Kahveler",
+    price: 8000,
+    emoji: "🧊",
+  },
+  {
+    id: 10,
+    name: "Iced Latte",
+    description: "Soğuk süt ve buzla hafif ama doyurucu.",
+    category: "Soğuk Kahveler",
+    price: 9000,
+    emoji: "🥛",
+  },
+  {
+    id: 11,
+    name: "Espresso Tonic",
+    description: "Tonik ve espressonun sıra dışı ferahlığı.",
+    category: "Soğuk Kahveler",
+    price: 9500,
+    emoji: "🍹",
+  },
+  {
+    id: 12,
+    name: "Matcha Latte",
+    description: "Antioksidan dolu Japon yeşil çayı ve süt.",
+    category: "Özel İçecekler",
+    price: 10000,
+    emoji: "🍵",
+    popular: true,
+  },
+  {
+    id: 13,
+    name: "Golden Milk",
+    description: "Zerdeçal, tarçın, süt ve balın sıcak buluşması.",
+    category: "Özel İçecekler",
+    price: 9500,
+    emoji: "🌙",
+  },
+  {
+    id: 14,
+    name: "Chai Latte",
+    description: "Baharat karışımıyla zenginleştirilmiş sütlü çay.",
+    category: "Özel İçecekler",
+    price: 9000,
+    emoji: "🫖",
+  },
+  {
+    id: 15,
+    name: "Kruvasan Sade",
+    description: "Tereyağlı Fransız hamur işi; kahveyle mükemmel uyum.",
+    category: "Tatlılar",
+    price: 6500,
+    emoji: "🥐",
+  },
+  {
+    id: 16,
+    name: "Kruvasan Çikolatalı",
+    description: "Tereyağlı kruvasan ve yoğun çikolata dolgusu.",
+    category: "Tatlılar",
+    price: 7500,
+    emoji: "🥐",
+  },
+  {
+    id: 17,
+    name: "Brownie",
+    description: "Yoğun çikolata ve hafif nemli dokusuyla enerji dolu.",
+    category: "Tatlılar",
+    price: 8000,
+    emoji: "🍫",
+  },
+  {
+    id: 18,
+    name: "Cheesecake",
+    description: "Kremamsı hafifliğiyle klasik bir lezzet.",
+    category: "Tatlılar",
+    price: 9000,
+    emoji: "🍰",
+    popular: true,
+  },
+  {
+    id: 19,
+    name: "Granola Bowl",
+    description: "Yoğurt, granola ve mevsim meyveleriyle sağlıklı seçim.",
+    category: "Tatlılar",
+    price: 9500,
+    emoji: "🥣",
   },
 ];
 
 const categories = [
   "Tümü",
-  "Burger",
-  "Pizza",
-  "Salata",
-  "Atıştırmalık",
-  "Tatlı",
-  "İçecek",
+  "Sıcak Kahveler",
+  "Soğuk Kahveler",
+  "Özel İçecekler",
+  "Tatlılar",
 ];
+
+const statusText: Record<Order["status"], string> = {
+  new: "Yeni sipariş",
+  preparing: "Hazırlanıyor",
+  ready: "Hazır",
+  served: "Teslim edildi",
+};
 
 const money = (value: number) =>
   new Intl.NumberFormat("tr-TR", {
@@ -127,17 +213,18 @@ const money = (value: number) =>
     maximumFractionDigits: 0,
   }).format(value / 100);
 
-const getInitialView = (): View => {
+function readView(): View {
   if (typeof window === "undefined") return "menu";
   const view = new URLSearchParams(window.location.search).get("view");
   if (view === "kasa") return "cashier";
+  if (view === "mutfak") return "kitchen";
   if (view === "qr") return "qr";
   return "menu";
-};
+}
 
 export function MenuSystem() {
-  const [view, setView] = useState<View>(getInitialView);
-  const [tableNo, setTableNo] = useState(7);
+  const [view, setView] = useState<View>(readView);
+  const [tableNo, setTableNo] = useState(5);
   const [category, setCategory] = useState("Tümü");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
@@ -152,27 +239,25 @@ export function MenuSystem() {
   }, []);
 
   const navigate = (next: View) => {
-    const url =
-      next === "cashier"
-        ? "?view=kasa"
-        : next === "qr"
-          ? "?view=qr"
-          : `?table=${tableNo}`;
-    window.history.pushState({}, "", url);
+    const urls: Record<View, string> = {
+      menu: `?table=${tableNo}`,
+      cashier: "?view=kasa",
+      kitchen: "?view=mutfak",
+      qr: "?view=qr",
+    };
+    window.history.pushState({}, "", urls[next]);
     setView(next);
   };
 
   const addToCart = (item: MenuItem) => {
     setCart((current) => {
       const match = current.find((cartItem) => cartItem.id === item.id);
-      if (match) {
-        return current.map((cartItem) =>
-          cartItem.id === item.id
-            ? { ...cartItem, quantity: cartItem.quantity + 1 }
-            : cartItem,
-        );
-      }
-      return [...current, { ...item, quantity: 1 }];
+      if (!match) return [...current, { ...item, quantity: 1 }];
+      return current.map((cartItem) =>
+        cartItem.id === item.id
+          ? { ...cartItem, quantity: cartItem.quantity + 1 }
+          : cartItem,
+      );
     });
   };
 
@@ -209,9 +294,7 @@ export function MenuSystem() {
         }),
       });
       const payload = (await response.json()) as { id?: string; error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error || "Sipariş gönderilemedi.");
-      }
+      if (!response.ok) throw new Error(payload.error || "Sipariş gönderilemedi.");
       setConfirmedOrder(payload.id?.slice(0, 6).toUpperCase() ?? "");
       setCart([]);
       setNote("");
@@ -225,55 +308,42 @@ export function MenuSystem() {
     }
   };
 
-  if (view === "cashier") {
-    return <CashierScreen onNavigate={navigate} />;
-  }
+  if (view === "cashier") return <CashierScreen onNavigate={navigate} />;
+  if (view === "kitchen") return <KitchenScreen onNavigate={navigate} />;
+  if (view === "qr") return <QrScreen onNavigate={navigate} />;
 
-  if (view === "qr") {
-    return <QrScreen onNavigate={navigate} />;
-  }
-
-  const filteredItems =
+  const visibleItems =
     category === "Tümü"
       ? menuItems
       : menuItems.filter((item) => item.category === category);
 
   return (
-    <main className="customer-shell">
-      <header className="customer-header">
-        <button
-          className="wordmark"
-          onClick={() => navigate("menu")}
-          aria-label="Menü ana sayfa"
-        >
-          masa<span>.</span>
+    <main className="guest-app">
+      <header className="guest-topbar">
+        <button className="brand-lockup" onClick={() => navigate("menu")}>
+          <strong>masa<span>.</span></strong>
+          <small>KAHVE &amp; MUTFAK</small>
         </button>
-        <div className="header-actions">
-          <button className="table-pill" onClick={() => navigate("qr")}>
-            <span className="live-dot" />
-            Masa {tableNo}
+        <div className="guest-top-actions">
+          <button
+            className="table-label"
+            onClick={() => navigate("qr")}
+            aria-label={`Masa ${tableNo} QR kodları`}
+          >
+            <span>Masa</span>
+            <strong>{String(tableNo).padStart(2, "0")}</strong>
           </button>
-          <button className="cashier-link" onClick={() => navigate("cashier")}>
-            Kasa ekranı
+          <button
+            className="round-admin-button"
+            onClick={() => navigate("cashier")}
+            aria-label="Yönetim panelini aç"
+          >
+            ☰
           </button>
         </div>
       </header>
 
-      <section className="menu-hero">
-        <div>
-          <p className="eyebrow">HOŞ GELDİNİZ · MASA {tableNo}</p>
-          <h1>Masaya gelsin.</h1>
-          <p className="hero-copy">
-            Canının çektiğini seç, siparişini ver. Gerisini bize bırak.
-          </p>
-        </div>
-        <div className="hero-orbit" aria-hidden="true">
-          <span className="orbit-text">TAPTAZE · MUTLU MASALAR · </span>
-          <span className="hero-plate">🍔</span>
-        </div>
-      </section>
-
-      <nav className="category-row" aria-label="Menü kategorileri">
+      <nav className="menu-tabs" aria-label="Menü kategorileri">
         {categories.map((item) => (
           <button
             key={item}
@@ -285,51 +355,73 @@ export function MenuSystem() {
         ))}
       </nav>
 
-      <section className="menu-section">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">BUGÜN NE YİYORUZ?</p>
-            <h2>{category === "Tümü" ? "Menüden seç" : category}</h2>
-          </div>
-          <span>{filteredItems.length} ürün</span>
+      <section className="coffee-hero">
+        <div className="hero-copy-block">
+          <p>MASA {String(tableNo).padStart(2, "0")} · HOŞ GELDİN</p>
+          <h1>Bugün ne içersin?</h1>
+          <span>Seç, sipariş ver; masaya getirelim.</span>
         </div>
-        <div className="menu-grid">
-          {filteredItems.map((item) => (
-            <article className="menu-card" key={item.id}>
-              <div className={`food-art ${item.art}`}>
-                {item.badge && (
-                  <span className="food-badge">{item.badge}</span>
-                )}
-                <span className="food-emoji" aria-hidden="true">
-                  {item.emoji}
-                </span>
+        <div className="coffee-stamp" aria-hidden="true">
+          <span className="stamp-rays">✦</span>
+          <span className="stamp-cup">☕</span>
+          <small>TAZE · SICAK · MUTLU</small>
+        </div>
+      </section>
+
+      <section className="menu-canvas">
+        <div className="menu-title-row">
+          <div>
+            <p>MENÜ</p>
+            <h2>{category}</h2>
+          </div>
+          <span>{visibleItems.length} ürün</span>
+        </div>
+
+        <div className="typographic-menu">
+          {visibleItems.map((item) => (
+            <article className="coffee-item" key={item.id}>
+              <div className="item-icon" aria-hidden="true">
+                {item.emoji}
               </div>
-              <div className="card-content">
-                <div>
-                  <p className="item-category">{item.category}</p>
+              <div className="item-copy">
+                <div className="item-name-line">
                   <h3>{item.name}</h3>
-                  <p className="item-description">{item.description}</p>
-                </div>
-                <div className="card-bottom">
+                  <span className="dot-leader" />
                   <strong>{money(item.price)}</strong>
-                  <button
-                    className="add-button"
-                    onClick={() => addToCart(item)}
-                    aria-label={`${item.name} sepete ekle`}
-                  >
-                    <span>+</span> Ekle
-                  </button>
+                </div>
+                <p>{item.description}</p>
+                <div className="item-meta">
+                  <span>{item.category}</span>
+                  {item.popular && <b>Çok sevilen</b>}
                 </div>
               </div>
+              <button
+                className="square-add"
+                onClick={() => addToCart(item)}
+                aria-label={`${item.name} sepete ekle`}
+              >
+                +
+              </button>
             </article>
           ))}
         </div>
       </section>
 
+      <footer className="menu-footer">
+        <div>
+          <strong>İyi kahve.</strong>
+          <strong>İyi masa.</strong>
+        </div>
+        <p>
+          Alerjen bilgisi için servis ekibimize danışabilirsiniz. Fiyatlara KDV
+          dahildir.
+        </p>
+      </footer>
+
       {cartCount > 0 && (
-        <button className="floating-cart" onClick={() => setCartOpen(true)}>
-          <span className="cart-count">{cartCount}</span>
-          <span>Sepeti gör</span>
+        <button className="order-fab" onClick={() => setCartOpen(true)}>
+          <span className="fab-count">{cartCount}</span>
+          <span>Siparişi gör</span>
           <strong>{money(cartTotal)}</strong>
         </button>
       )}
@@ -337,110 +429,91 @@ export function MenuSystem() {
       {cartOpen && (
         <div className="drawer-backdrop" onClick={() => setCartOpen(false)}>
           <aside
-            className="cart-drawer"
+            className="order-drawer"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="drawer-handle" />
-            <div className="drawer-heading">
+            <div className="drawer-grip" />
+            <header className="drawer-header">
               <div>
-                <p className="eyebrow">MASA {tableNo}</p>
+                <p>MASA {String(tableNo).padStart(2, "0")}</p>
                 <h2>Siparişin</h2>
               </div>
-              <button
-                onClick={() => setCartOpen(false)}
-                aria-label="Sepeti kapat"
-              >
+              <button onClick={() => setCartOpen(false)} aria-label="Sepeti kapat">
                 ×
               </button>
-            </div>
-            <div className="cart-items">
+            </header>
+            <div className="drawer-items">
               {cart.map((item) => (
-                <div className="cart-line" key={item.id}>
-                  <span className={`cart-thumb ${item.art}`}>
-                    {item.emoji}
-                  </span>
-                  <div className="cart-name">
+                <div className="drawer-line" key={item.id}>
+                  <span className="drawer-emoji">{item.emoji}</span>
+                  <div>
                     <strong>{item.name}</strong>
-                    <span>{money(item.price)}</span>
+                    <small>{money(item.price)}</small>
                   </div>
-                  <div className="quantity-control">
-                    <button
-                      onClick={() => setQuantity(item.id, item.quantity - 1)}
-                    >
+                  <div className="quantity-stepper">
+                    <button onClick={() => setQuantity(item.id, item.quantity - 1)}>
                       −
                     </button>
                     <span>{item.quantity}</span>
-                    <button
-                      onClick={() => setQuantity(item.id, item.quantity + 1)}
-                    >
+                    <button onClick={() => setQuantity(item.id, item.quantity + 1)}>
                       +
                     </button>
                   </div>
                 </div>
               ))}
             </div>
-            <label className="note-field">
+            <label className="order-note-field">
               <span>Sipariş notu</span>
               <textarea
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
-                placeholder="Örn. Soğansız olsun"
                 maxLength={300}
+                placeholder="Örn. Şekersiz olsun"
               />
             </label>
-            <div className="checkout-total">
+            <div className="drawer-total">
               <span>Toplam</span>
               <strong>{money(cartTotal)}</strong>
             </div>
             <button
-              className="checkout-button"
-              onClick={placeOrder}
+              className="send-order-button"
               disabled={placing}
+              onClick={placeOrder}
             >
-              {placing
-                ? "Gönderiliyor..."
-                : `Siparişi gönder · ${money(cartTotal)}`}
+              {placing ? "Gönderiliyor…" : "Siparişi mutfağa gönder"}
             </button>
-            <p className="checkout-note">Sipariş doğrudan kasaya iletilecek.</p>
           </aside>
         </div>
       )}
 
       {confirmedOrder !== null && (
         <div className="success-overlay">
-          <div className="success-card">
-            <span className="success-check">✓</span>
-            <p className="eyebrow">SİPARİŞ ALINDI</p>
-            <h2>Mutfağa ilettik!</h2>
-            <p>Masa {tableNo} için siparişiniz hazırlanacak.</p>
-            <small>Sipariş #{confirmedOrder}</small>
+          <section className="success-ticket">
+            <span className="success-mark">✓</span>
+            <p>SİPARİŞ ALINDI</p>
+            <h2>Hazırlamaya başlıyoruz.</h2>
+            <span>Masa {tableNo} · Sipariş #{confirmedOrder}</span>
             <button onClick={() => setConfirmedOrder(null)}>Menüye dön</button>
-          </div>
+          </section>
         </div>
       )}
     </main>
   );
 }
 
-function CashierScreen({
-  onNavigate,
-}: {
-  onNavigate: (view: View) => void;
-}) {
+function useLiveOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const loadOrders = useCallback(async () => {
+  const reload = useCallback(async () => {
     try {
       const response = await fetch("/api/orders", { cache: "no-store" });
       const payload = (await response.json()) as {
         orders?: Order[];
         error?: string;
       };
-      if (!response.ok) {
-        throw new Error(payload.error || "Siparişler alınamadı.");
-      }
+      if (!response.ok) throw new Error(payload.error || "Siparişler alınamadı.");
       setOrders(payload.orders ?? []);
       setError("");
     } catch (loadError) {
@@ -453,10 +526,10 @@ function CashierScreen({
   }, []);
 
   useEffect(() => {
-    loadOrders();
-    const timer = window.setInterval(loadOrders, 4000);
+    reload();
+    const timer = window.setInterval(reload, 4000);
     return () => window.clearInterval(timer);
-  }, [loadOrders]);
+  }, [reload]);
 
   const updateStatus = async (id: string, status: Order["status"]) => {
     setOrders((current) =>
@@ -471,192 +544,316 @@ function CashierScreen({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, status }),
     });
-    if (!response.ok) loadOrders();
+    if (!response.ok) reload();
   };
 
-  const grouped = useMemo(
-    () => ({
-      new: orders.filter((order) => order.status === "new"),
-      preparing: orders.filter((order) => order.status === "preparing"),
-      ready: orders.filter((order) => order.status === "ready"),
-    }),
-    [orders],
-  );
+  return { orders, loading, error, reload, updateStatus };
+}
 
+function ManagementSidebar({
+  active,
+  onNavigate,
+}: {
+  active: "cashier" | "kitchen" | "qr";
+  onNavigate: (view: View) => void;
+}) {
   return (
-    <main className="cashier-shell">
-      <aside className="cashier-sidebar">
+    <aside className="management-sidebar">
+      <div className="admin-brand">
+        <strong>masa<span>.</span></strong>
+        <small>YÖNETİM PANELİ</small>
+      </div>
+      <nav>
         <button
-          className="wordmark light"
+          className={active === "cashier" ? "active" : ""}
           onClick={() => onNavigate("cashier")}
         >
-          masa<span>.</span>
+          <span>▦</span> Canlı siparişler
         </button>
-        <nav>
-          <button className="active">
-            <span>▦</span> Siparişler
-          </button>
-          <button onClick={() => onNavigate("menu")}>
-            <span>⌕</span> Müşteri menüsü
-          </button>
-          <button onClick={() => onNavigate("qr")}>
-            <span>⌗</span> QR kodlar
-          </button>
-        </nav>
-        <div className="venue-card">
-          <span className="venue-avatar">M</span>
-          <div>
-            <strong>Masa Bistro</strong>
-            <small>Şube açık</small>
-          </div>
-          <span className="live-dot" />
+        <button
+          className={active === "kitchen" ? "active" : ""}
+          onClick={() => onNavigate("kitchen")}
+        >
+          <span>◫</span> Mutfak ekranı
+        </button>
+        <button
+          className={active === "qr" ? "active" : ""}
+          onClick={() => onNavigate("qr")}
+        >
+          <span>⌗</span> Masa QR kodları
+        </button>
+        <button onClick={() => onNavigate("menu")}>
+          <span>☕</span> Müşteri menüsü
+        </button>
+      </nav>
+      <div className="admin-profile">
+        <span>MP</span>
+        <div>
+          <strong>Masa Personeli</strong>
+          <small>Terminal 01 · Çevrimiçi</small>
         </div>
-      </aside>
-      <section className="cashier-main">
-        <header className="cashier-header">
+      </div>
+    </aside>
+  );
+}
+
+function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
+  const { orders, loading, error, reload, updateStatus } = useLiveOrders();
+  const activeTables = new Set(orders.map((order) => order.tableNo)).size;
+  const dailyRevenue = orders.reduce((sum, order) => sum + order.total, 0);
+  const readyCount = orders.filter((order) => order.status === "ready").length;
+
+  return (
+    <main className="management-shell">
+      <ManagementSidebar active="cashier" onNavigate={onNavigate} />
+      <section className="admin-main">
+        <header className="admin-topbar">
           <div>
-            <p className="eyebrow">CANLI OPERASYON</p>
-            <h1>Siparişler</h1>
+            <p>TERMINAL 01</p>
+            <h1>İşletme Özeti</h1>
           </div>
-          <div className="cashier-actions">
-            <span className="sync-state">
-              <i /> Canlı
-            </span>
-            <button onClick={loadOrders} aria-label="Siparişleri yenile">
-              ↻
-            </button>
+          <div className="admin-top-actions">
+            <span className="connection-pill"><i /> Sistem çevrimiçi</span>
+            <button onClick={reload} aria-label="Siparişleri yenile">↻</button>
           </div>
         </header>
 
-        <div className="summary-strip">
-          <div>
-            <span>Yeni sipariş</span>
-            <strong>{grouped.new.length}</strong>
-          </div>
-          <div>
-            <span>Hazırlanıyor</span>
-            <strong>{grouped.preparing.length}</strong>
-          </div>
-          <div>
-            <span>Teslime hazır</span>
-            <strong>{grouped.ready.length}</strong>
-          </div>
-          <div className="summary-highlight">
-            <span>Aktif toplam</span>
-            <strong>{orders.length}</strong>
-          </div>
-        </div>
+        <section className="metric-grid" aria-label="İşletme özeti">
+          <article>
+            <span>AKTİF MASA</span>
+            <strong>{activeTables} <small>/ 12</small></strong>
+            <i className="metric-icon">▦</i>
+          </article>
+          <article>
+            <span>AÇIK SİPARİŞ</span>
+            <strong>{String(orders.length).padStart(2, "0")}</strong>
+            <i className="metric-icon orange">◴</i>
+          </article>
+          <article>
+            <span>AKTİF CİRO</span>
+            <strong>{money(dailyRevenue)}</strong>
+            <i className="metric-icon green">₺</i>
+          </article>
+          <article>
+            <span>TESLİME HAZIR</span>
+            <strong>{String(readyCount).padStart(2, "0")}</strong>
+            <i className="metric-icon blue">✓</i>
+          </article>
+        </section>
 
-        {error && <div className="error-banner">{error}</div>}
+        <section className="live-order-section">
+          <header>
+            <div>
+              <p>CANLI AKIŞ</p>
+              <h2>Siparişler</h2>
+            </div>
+            <div className="order-legend">
+              <span><i className="new" /> Yeni</span>
+              <span><i className="preparing" /> Hazırlanıyor</span>
+              <span><i className="ready" /> Hazır</span>
+            </div>
+          </header>
 
-        <div className="order-board">
-          <OrderColumn
-            title="Yeni"
-            accent="coral"
-            orders={grouped.new}
-            empty={loading ? "Siparişler yükleniyor..." : "Yeni sipariş yok"}
-            actionLabel="Hazırlamaya başla"
-            nextStatus="preparing"
-            onUpdate={updateStatus}
-          />
-          <OrderColumn
-            title="Hazırlanıyor"
-            accent="amber"
-            orders={grouped.preparing}
-            empty="Hazırlanan sipariş yok"
-            actionLabel="Hazır olarak işaretle"
-            nextStatus="ready"
-            onUpdate={updateStatus}
-          />
-          <OrderColumn
-            title="Hazır"
-            accent="mint"
-            orders={grouped.ready}
-            empty="Teslime hazır sipariş yok"
-            actionLabel="Teslim edildi"
-            nextStatus="served"
-            onUpdate={updateStatus}
-          />
-        </div>
+          {error && <div className="admin-error">{error}</div>}
+          <div className="admin-order-grid" aria-live="polite">
+            {!orders.length && (
+              <div className="admin-empty">
+                <span>◎</span>
+                <strong>
+                  {loading ? "Siparişler yükleniyor…" : "Henüz açık sipariş yok"}
+                </strong>
+                <p>Müşteriden gelen yeni sipariş burada görünecek.</p>
+              </div>
+            )}
+            {orders.map((order) => (
+              <article
+                className={`admin-order-card status-${order.status}`}
+                key={order.id}
+              >
+                <div className="admin-order-head">
+                  <div>
+                    <span className={`status-badge ${order.status}`}>
+                      {statusText[order.status]}
+                    </span>
+                    <h3>Masa {String(order.tableNo).padStart(2, "0")}</h3>
+                    <small>#{order.id.slice(0, 6).toUpperCase()}</small>
+                  </div>
+                  <div className="elapsed-block">
+                    <strong>{minutesSince(order.createdAt)} dk</strong>
+                    <span>{formatTime(order.createdAt)}</span>
+                  </div>
+                </div>
+                <div className="admin-order-items">
+                  {order.items.map((item) => (
+                    <div key={item.id}>
+                      <span><b>{item.quantity}×</b> {item.name}</span>
+                      <small>{money(item.price * item.quantity)}</small>
+                    </div>
+                  ))}
+                </div>
+                {order.note && <p className="admin-order-note">Not: {order.note}</p>}
+                <div className="admin-order-total">
+                  <span>Toplam</span>
+                  <strong>{money(order.total)}</strong>
+                </div>
+                <OrderAction order={order} onUpdate={updateStatus} />
+              </article>
+            ))}
+          </div>
+        </section>
       </section>
     </main>
   );
 }
 
-function OrderColumn({
-  title,
-  accent,
-  orders,
-  empty,
-  actionLabel,
-  nextStatus,
+function OrderAction({
+  order,
   onUpdate,
 }: {
-  title: string;
-  accent: string;
-  orders: Order[];
-  empty: string;
-  actionLabel: string;
-  nextStatus: Order["status"];
+  order: Order;
   onUpdate: (id: string, status: Order["status"]) => void;
 }) {
+  if (order.status === "new") {
+    return (
+      <button
+        className="admin-order-action"
+        onClick={() => onUpdate(order.id, "preparing")}
+      >
+        Hazırlamaya başla <span>→</span>
+      </button>
+    );
+  }
+  if (order.status === "preparing") {
+    return (
+      <button
+        className="admin-order-action"
+        onClick={() => onUpdate(order.id, "ready")}
+      >
+        Hazır olarak işaretle <span>→</span>
+      </button>
+    );
+  }
   return (
-    <section className={`order-column ${accent}`}>
-      <header>
-        <div>
-          <span className="column-dot" />
-          <h2>{title}</h2>
-        </div>
-        <strong>{orders.length}</strong>
-      </header>
-      <div className="order-list">
-        {!orders.length && (
-          <div className="empty-column">
-            <span>◎</span>
-            {empty}
-          </div>
-        )}
-        {orders.map((order) => (
-          <article className="order-card" key={order.id}>
-            <div className="order-top">
-              <div>
-                <span className="table-number">Masa {order.tableNo}</span>
-                <small>#{order.id.slice(0, 6).toUpperCase()}</small>
-              </div>
-              <time>{formatTime(order.createdAt)}</time>
-            </div>
-            <div className="order-items">
-              {order.items.map((item) => (
-                <div key={item.id}>
-                  <strong>{item.quantity}×</strong>
-                  <span>{item.name}</span>
-                  <small>{money(item.price * item.quantity)}</small>
-                </div>
-              ))}
-            </div>
-            {order.note && <p className="order-note">“{order.note}”</p>}
-            <div className="order-total">
-              <span>Toplam</span>
-              <strong>{money(order.total)}</strong>
-            </div>
-            <button
-              className="order-action"
-              onClick={() => onUpdate(order.id, nextStatus)}
-            >
-              {actionLabel} <span>→</span>
-            </button>
-          </article>
-        ))}
-      </div>
-    </section>
+    <button
+      className="admin-order-action ready-action"
+      onClick={() => onUpdate(order.id, "served")}
+    >
+      Teslim edildi <span>✓</span>
+    </button>
   );
 }
 
-function QrScreen({
-  onNavigate,
-}: {
-  onNavigate: (view: View) => void;
-}) {
+function KitchenScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
+  const { orders, loading, error, reload, updateStatus } = useLiveOrders();
+  const [clock, setClock] = useState("");
+
+  useEffect(() => {
+    const updateClock = () =>
+      setClock(
+        new Intl.DateTimeFormat("tr-TR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }).format(new Date()),
+      );
+    updateClock();
+    const timer = window.setInterval(updateClock, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <main className="kitchen-shell">
+      <aside className="kitchen-rail">
+        <button className="kitchen-logo" onClick={() => onNavigate("cashier")}>
+          masa<span>.</span>
+        </button>
+        <nav>
+          <button className="active" aria-label="Mutfak siparişleri">◫</button>
+          <button onClick={() => onNavigate("cashier")} aria-label="Kasa paneli">▦</button>
+          <button onClick={() => onNavigate("qr")} aria-label="QR kodları">⌗</button>
+          <button onClick={() => onNavigate("menu")} aria-label="Menü">☕</button>
+        </nav>
+      </aside>
+      <section className="kitchen-main">
+        <header className="kitchen-header">
+          <div>
+            <p>MUTFAK OPERASYONU</p>
+            <h1>Sipariş Ekranı</h1>
+          </div>
+          <div className="kitchen-stats">
+            <span className="kitchen-online"><i /> Bağlı</span>
+            <div><small>AKTİF FİŞ</small><strong>{orders.length}</strong></div>
+            <div><small>ORT. SÜRE</small><strong>12 dk</strong></div>
+            <button onClick={reload} aria-label="Siparişleri yenile">↻</button>
+          </div>
+        </header>
+
+        {error && <div className="kitchen-error">{error}</div>}
+        <section className="ticket-board" aria-live="polite">
+          {!orders.length && (
+            <div className="kitchen-empty">
+              <span>◌</span>
+              <h2>{loading ? "Siparişler yükleniyor…" : "Mutfak hazır"}</h2>
+              <p>Yeni sipariş geldiğinde burada bir fiş açılacak.</p>
+            </div>
+          )}
+          {orders.map((order) => (
+            <article className={`kitchen-ticket ticket-${order.status}`} key={order.id}>
+              <header>
+                <div>
+                  <h2>M-{String(order.tableNo).padStart(2, "0")}</h2>
+                  <span>{statusText[order.status]}</span>
+                </div>
+                <div>
+                  <strong className={minutesSince(order.createdAt) >= 15 ? "late" : ""}>
+                    {minutesSince(order.createdAt)} dk
+                  </strong>
+                  <small>{formatTime(order.createdAt)}</small>
+                </div>
+              </header>
+              <div className="ticket-items">
+                {order.items.map((item) => (
+                  <div key={item.id}>
+                    <strong>{item.quantity}×</strong>
+                    <span>{item.name}</span>
+                  </div>
+                ))}
+                {order.note && <p>NOT · {order.note}</p>}
+              </div>
+              <footer>
+                {order.status === "new" && (
+                  <button onClick={() => updateStatus(order.id, "preparing")}>
+                    <span>♨</span> Hazırlamaya başla
+                  </button>
+                )}
+                {order.status === "preparing" && (
+                  <button onClick={() => updateStatus(order.id, "ready")}>
+                    <span>✓</span> Hazır
+                  </button>
+                )}
+                {order.status === "ready" && (
+                  <button className="waiting" onClick={() => onNavigate("cashier")}>
+                    <span>◉</span> Teslim bekliyor
+                  </button>
+                )}
+              </footer>
+            </article>
+          ))}
+        </section>
+        <footer className="kitchen-statusbar">
+          <div>
+            <span>SİSTEM: AKTİF</span>
+            <span>YAZICI: ÇEVRİMİÇİ</span>
+            <span>MASALAR: SENKRONİZE</span>
+          </div>
+          <strong>{clock}</strong>
+        </footer>
+      </section>
+    </main>
+  );
+}
+
+function QrScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
   const [codes, setCodes] = useState<Record<number, string>>({});
 
   useEffect(() => {
@@ -669,8 +866,8 @@ function QrScreen({
             `${window.location.origin}/?table=${table}`,
             {
               margin: 1,
-              width: 240,
-              color: { dark: "#18201d", light: "#fffdf7" },
+              width: 260,
+              color: { dark: "#201f1a", light: "#fffaf0" },
             },
           ).then((dataUrl) => [table, dataUrl] as const);
         }),
@@ -684,52 +881,45 @@ function QrScreen({
   }, []);
 
   return (
-    <main className="qr-shell">
-      <header className="qr-header">
-        <div>
-          <button className="wordmark" onClick={() => onNavigate("menu")}>
-            masa<span>.</span>
-          </button>
+    <main className="management-shell qr-management-shell">
+      <ManagementSidebar active="qr" onNavigate={onNavigate} />
+      <section className="qr-main">
+        <header className="qr-page-header">
           <div>
-            <p className="eyebrow">MASAYA ÖZEL</p>
-            <h1>QR Kodlar</h1>
-            <p>Her masanın kodu siparişi doğru masaya bağlar.</p>
+            <p>MASA YÖNETİMİ</p>
+            <h1>QR Kodları</h1>
+            <span>Her kod siparişi otomatik olarak doğru masaya bağlar.</span>
           </div>
-        </div>
-        <button
-          className="back-to-cashier"
-          onClick={() => onNavigate("cashier")}
-        >
-          ← Kasa ekranı
-        </button>
-      </header>
-      <section className="qr-grid">
-        {Array.from({ length: 12 }, (_, index) => {
-          const table = index + 1;
-          return (
-            <article className="qr-card" key={table}>
-              <div className="qr-card-top">
-                <span>masa.</span>
-                <small>MASA {String(table).padStart(2, "0")}</small>
-              </div>
-              <div className="qr-image-wrap">
-                {codes[table] ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={codes[table]} alt={`Masa ${table} QR kodu`} />
-                ) : (
-                  <span className="qr-loading">Hazırlanıyor</span>
+          <button onClick={() => onNavigate("cashier")}>← Panele dön</button>
+        </header>
+        <div className="qr-card-grid">
+          {Array.from({ length: 12 }, (_, index) => {
+            const table = index + 1;
+            return (
+              <article className="print-qr-card" key={table}>
+                <header>
+                  <strong>masa<span>.</span></strong>
+                  <small>MASA {String(table).padStart(2, "0")}</small>
+                </header>
+                <div className="qr-art">
+                  {codes[table] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={codes[table]} alt={`Masa ${table} QR kodu`} />
+                  ) : (
+                    <span>Hazırlanıyor…</span>
+                  )}
+                </div>
+                <h2>Masa {String(table).padStart(2, "0")}</h2>
+                <p>Okut · Seç · Sipariş ver</p>
+                {codes[table] && (
+                  <a href={codes[table]} download={`masa-${table}-qr.png`}>
+                    QR kodu indir
+                  </a>
                 )}
-              </div>
-              <h2>Masa {table}</h2>
-              <p>Okut, seç, sipariş ver.</p>
-              {codes[table] && (
-                <a href={codes[table]} download={`masa-${table}-qr.png`}>
-                  QR kodu indir
-                </a>
-              )}
-            </article>
-          );
-        })}
+              </article>
+            );
+          })}
+        </div>
       </section>
     </main>
   );
@@ -744,4 +934,12 @@ function formatTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function minutesSince(value: string) {
+  const date = new Date(
+    value.includes("T") ? value : `${value.replace(" ", "T")}Z`,
+  );
+  if (Number.isNaN(date.getTime())) return 0;
+  return Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
 }
