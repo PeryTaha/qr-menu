@@ -67,11 +67,41 @@ export async function ensureAppSchema() {
     db.prepare(
       "CREATE INDEX IF NOT EXISTS table_sessions_active_idx ON table_sessions (active, expires_at)",
     ),
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS pos_payment_requests (
+        id TEXT PRIMARY KEY,
+        table_no INTEGER NOT NULL,
+        amount INTEGER NOT NULL,
+        selections TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        payment_id TEXT,
+        error TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`,
+    ),
+    db.prepare(
+      "CREATE INDEX IF NOT EXISTS pos_payment_requests_status_idx ON pos_payment_requests (status, created_at)",
+    ),
   ]);
 
   const menuColumns = await db.prepare("PRAGMA table_info(menu_items)").all();
   if (!menuColumns.results.some((column) => column.name === "image_key")) {
     await db.prepare("ALTER TABLE menu_items ADD COLUMN image_key TEXT").run();
+  }
+  if (!menuColumns.results.some((column) => column.name === "image_focal_x")) {
+    await db
+      .prepare(
+        "ALTER TABLE menu_items ADD COLUMN image_focal_x INTEGER NOT NULL DEFAULT 50",
+      )
+      .run();
+  }
+  if (!menuColumns.results.some((column) => column.name === "image_focal_y")) {
+    await db
+      .prepare(
+        "ALTER TABLE menu_items ADD COLUMN image_focal_y INTEGER NOT NULL DEFAULT 50",
+      )
+      .run();
   }
 
   const seedState = await db

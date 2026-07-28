@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     const requestedTable = Number(url.searchParams.get("table"));
     const hasTableFilter =
       Number.isInteger(requestedTable) && requestedTable > 0;
-    if (!hasTableFilter && !(await isStaffRequest(request))) {
+    if (!(await isStaffRequest(request))) {
       return Response.json(
         { error: "Personel oturumu gerekli." },
         { status: 401 },
@@ -124,6 +124,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    if (!(await isStaffRequest(request))) {
+      return Response.json(
+        { error: "Sipariş girişi yalnızca personel tarafından yapılabilir." },
+        { status: 401 },
+      );
+    }
     const payload = (await request.json()) as {
       tableNo?: number;
       items?: Array<{ id?: number; quantity?: number }>;

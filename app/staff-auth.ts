@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 const COOKIE_NAME = "masa_staff";
 const SESSION_SECONDS = 12 * 60 * 60;
 
-function safeEqual(left: string, right: string) {
+export function safeEqual(left: string, right: string) {
   if (!left || left.length !== right.length) return false;
   let mismatch = 0;
   for (let index = 0; index < left.length; index += 1) {

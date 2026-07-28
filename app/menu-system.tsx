@@ -3,10 +3,12 @@
 import {
   type ChangeEvent,
   type FormEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import QRCode from "qrcode";
@@ -20,10 +22,19 @@ type MenuItem = {
   emoji: string;
   imageKey?: string | null;
   imageUrl?: string | null;
+  imageFocalX?: number;
+  imageFocalY?: number;
   popular?: boolean;
   available?: boolean;
   sortOrder?: number;
 };
+
+const imageFocalStyle = (item: {
+  imageFocalX?: number;
+  imageFocalY?: number;
+}) => ({
+  objectPosition: `${item.imageFocalX ?? 50}% ${item.imageFocalY ?? 50}%`,
+});
 
 type CartItem = MenuItem & { quantity: number };
 
@@ -53,7 +64,7 @@ type PaymentSelection = {
   quantity: number;
 };
 
-type View = "menu" | "cashier" | "kitchen" | "qr" | "menuEditor";
+type View = "menu" | "waiter" | "cashier" | "kitchen" | "qr" | "menuEditor";
 
 const fallbackMenuItems: MenuItem[] = [
   {
@@ -235,6 +246,7 @@ const paidQuantity = (order: Order, itemId: number) =>
 function readView(): View {
   if (typeof window === "undefined") return "menu";
   const view = new URLSearchParams(window.location.search).get("view");
+  if (view === "garson") return "waiter";
   if (view === "kasa") return "cashier";
   if (view === "mutfak") return "kitchen";
   if (view === "qr") return "qr";
@@ -251,18 +263,20 @@ function readTableNo() {
 }
 
 export function MenuSystem() {
-  const [view, setView] = useState<View>(readView);
-  const [tableNo] = useState(readTableNo);
+  const [view, setView] = useState<View>("menu");
+  const [tableNo, setTableNo] = useState(5);
+
+  useEffect(() => {
+    const syncFromUrl = window.setTimeout(() => {
+      setView(readView());
+      setTableNo(readTableNo());
+    }, 0);
+    return () => window.clearTimeout(syncFromUrl);
+  }, []);
   const [category, setCategory] = useState("Tümü");
   const [menuItems, setMenuItems] =
     useState<MenuItem[]>(fallbackMenuItems);
   const [menuError, setMenuError] = useState("");
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [cartOpen, setCartOpen] = useState(false);
-  const [note, setNote] = useState("");
-  const [placing, setPlacing] = useState(false);
-  const [confirmedOrder, setConfirmedOrder] = useState<string | null>(null);
-  const [statusRefreshKey, setStatusRefreshKey] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -299,6 +313,7 @@ export function MenuSystem() {
   const navigate = (next: View) => {
     const urls: Record<View, string> = {
       menu: `?table=${tableNo}`,
+      waiter: "?view=garson",
       cashier: "?view=kasa",
       kitchen: "?view=mutfak",
       qr: "?view=qr",
@@ -308,68 +323,17 @@ export function MenuSystem() {
     setView(next);
   };
 
-  const addToCart = (item: MenuItem) => {
-    setCart((current) => {
-      const match = current.find((cartItem) => cartItem.id === item.id);
-      if (!match) return [...current, { ...item, quantity: 1 }];
-      return current.map((cartItem) =>
-        cartItem.id === item.id
-          ? { ...cartItem, quantity: cartItem.quantity + 1 }
-          : cartItem,
-      );
-    });
-  };
-
-  const setQuantity = (id: number, quantity: number) => {
-    setCart((current) =>
-      quantity <= 0
-        ? current.filter((item) => item.id !== id)
-        : current.map((item) => (item.id === id ? { ...item, quantity } : item)),
+  if (view === "waiter") {
+    return (
+      <StaffGate onBack={() => navigate("menu")}>
+        <WaiterScreen menuItems={menuItems} onNavigate={navigate} />
+      </StaffGate>
     );
-  };
-
-  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-  const cartTotal = cart.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0,
-  );
-
-  const placeOrder = async () => {
-    if (!cart.length || placing) return;
-    setPlacing(true);
-    try {
-      const response = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tableNo,
-          note,
-          items: cart.map(({ id, quantity }) => ({
-            id,
-            quantity,
-          })),
-        }),
-      });
-      const payload = (await response.json()) as { id?: string; error?: string };
-      if (!response.ok) throw new Error(payload.error || "Sipariş gönderilemedi.");
-      setConfirmedOrder(payload.id?.slice(0, 6).toUpperCase() ?? "");
-      setCart([]);
-      setNote("");
-      setCartOpen(false);
-      setStatusRefreshKey((current) => current + 1);
-    } catch (error) {
-      window.alert(
-        error instanceof Error ? error.message : "Sipariş gönderilemedi.",
-      );
-    } finally {
-      setPlacing(false);
-    }
-  };
-
+  }
   if (view === "cashier") {
     return (
       <StaffGate onBack={() => navigate("menu")}>
-        <CashierScreen onNavigate={navigate} />
+        <CashierScreen menuItems={menuItems} onNavigate={navigate} />
       </StaffGate>
     );
   }
@@ -485,11 +449,6 @@ export function MenuSystem() {
         </div>
       </section>
 
-      <CustomerOrderStatus
-        tableNo={tableNo}
-        refreshKey={statusRefreshKey}
-      />
-
       <section className="menu-canvas">
         <div className="menu-title-row">
           <div>
@@ -506,7 +465,12 @@ export function MenuSystem() {
               <div className="menu-item-photo">
                 {item.imageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={item.imageUrl} alt={item.name} loading="lazy" />
+                  <img
+                    src={item.imageUrl}
+                    alt={item.name}
+                    loading="lazy"
+                    style={imageFocalStyle(item)}
+                  />
                 ) : (
                   <span aria-label="Fotoğraf eklenmedi">masa.</span>
                 )}
@@ -523,13 +487,6 @@ export function MenuSystem() {
                   <span>{item.category}</span>
                 </div>
               </div>
-              <button
-                className="square-add"
-                onClick={() => addToCart(item)}
-                aria-label={`${item.name} sepete ekle`}
-              >
-                +
-              </button>
             </article>
           ))}
         </div>
@@ -545,197 +502,7 @@ export function MenuSystem() {
           dahildir.
         </p>
       </footer>
-
-      {cartCount > 0 && (
-        <button className="order-fab" onClick={() => setCartOpen(true)}>
-          <span className="fab-count">{cartCount}</span>
-          <span>Siparişi gör</span>
-          <strong>{money(cartTotal)}</strong>
-        </button>
-      )}
-
-      {cartOpen && (
-        <div className="drawer-backdrop" onClick={() => setCartOpen(false)}>
-          <aside
-            className="order-drawer"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="drawer-grip" />
-            <header className="drawer-header">
-              <div>
-                <p>MASA {String(tableNo).padStart(2, "0")}</p>
-                <h2>Siparişin</h2>
-              </div>
-              <button onClick={() => setCartOpen(false)} aria-label="Sepeti kapat">
-                ×
-              </button>
-            </header>
-            <div className="drawer-items">
-              {cart.map((item) => (
-                <div className="drawer-line" key={item.id}>
-                  <span className="drawer-emoji">{item.emoji}</span>
-                  <div>
-                    <strong>{item.name}</strong>
-                    <small>{money(item.price)}</small>
-                  </div>
-                  <div className="quantity-stepper">
-                    <button onClick={() => setQuantity(item.id, item.quantity - 1)}>
-                      −
-                    </button>
-                    <span>{item.quantity}</span>
-                    <button onClick={() => setQuantity(item.id, item.quantity + 1)}>
-                      +
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <label className="order-note-field">
-              <span>Sipariş notu</span>
-              <textarea
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                maxLength={300}
-                placeholder="Örn. Şekersiz olsun"
-              />
-            </label>
-            <div className="drawer-total">
-              <span>Toplam</span>
-              <strong>{money(cartTotal)}</strong>
-            </div>
-            <button
-              className="send-order-button"
-              disabled={placing}
-              onClick={placeOrder}
-            >
-              {placing ? "Gönderiliyor…" : "Siparişi mutfağa gönder"}
-            </button>
-          </aside>
-        </div>
-      )}
-
-      {confirmedOrder !== null && (
-        <div className="success-overlay">
-          <section className="success-ticket">
-            <span className="success-mark">✓</span>
-            <p>SİPARİŞ ALINDI</p>
-            <h2>Hazırlamaya başlıyoruz.</h2>
-            <span>Masa {tableNo} · Sipariş #{confirmedOrder}</span>
-            <button onClick={() => setConfirmedOrder(null)}>Menüye dön</button>
-          </section>
-        </div>
-      )}
     </main>
-  );
-}
-
-function CustomerOrderStatus({
-  tableNo,
-  refreshKey,
-}: {
-  tableNo: number;
-  refreshKey: number;
-}) {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    const loadStatus = async () => {
-      try {
-        const response = await fetch(`/api/orders?table=${tableNo}`, {
-          cache: "no-store",
-        });
-        const payload = (await response.json()) as {
-          orders?: Order[];
-          error?: string;
-        };
-        if (!response.ok) {
-          throw new Error(payload.error || "Sipariş durumu alınamadı.");
-        }
-        if (active) {
-          setOrders(payload.orders ?? []);
-          setError("");
-        }
-      } catch {
-        if (active) setError("Sipariş durumu şu anda yenilenemiyor.");
-      }
-    };
-
-    loadStatus();
-    const timer = window.setInterval(loadStatus, 4000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [tableNo, refreshKey]);
-
-  if (!orders.length && !error) return null;
-
-  const tableTotal = orders.reduce(
-    (sum, order) => sum + (order.remainingTotal ?? order.total),
-    0,
-  );
-  const steps = [
-    { status: "new", label: "Alındı" },
-    { status: "preparing", label: "Hazırlanıyor" },
-    { status: "ready", label: "Hazır" },
-    { status: "served", label: "Teslim" },
-  ] as const;
-  const ranks: Record<Order["status"], number> = {
-    new: 0,
-    preparing: 1,
-    ready: 2,
-    served: 3,
-    closed: 3,
-  };
-
-  return (
-    <section className="customer-status-panel" aria-live="polite">
-      <header>
-        <div>
-          <p>CANLI SİPARİŞ TAKİBİ</p>
-          <h2>Masa {String(tableNo).padStart(2, "0")} hesabı</h2>
-        </div>
-        <div className="customer-account-total">
-          <span>Kalan hesap</span>
-          <strong>{money(tableTotal)}</strong>
-        </div>
-      </header>
-      {error && <p className="customer-status-error">{error}</p>}
-      <div className="customer-order-status-list">
-        {orders.map((order, orderIndex) => {
-          const rank = ranks[order.status];
-          return (
-            <article className="customer-status-card" key={order.id}>
-              <div className="customer-status-head">
-                <div>
-                  <span>Sipariş {orders.length - orderIndex}</span>
-                  <small>#{order.id.slice(0, 6).toUpperCase()}</small>
-                </div>
-                <div>
-                  <strong>{statusText[order.status]}</strong>
-                  <small>{money(order.remainingTotal ?? order.total)}</small>
-                </div>
-              </div>
-              <div className="status-timeline">
-                {steps.map((step, index) => (
-                  <div
-                    className={
-                      index < rank ? "done" : index === rank ? "active" : ""
-                    }
-                    key={step.status}
-                  >
-                    <i>{index <= rank ? "✓" : ""}</i>
-                    <span>{step.label}</span>
-                  </div>
-                ))}
-              </div>
-            </article>
-          );
-        })}
-      </div>
-    </section>
   );
 }
 
@@ -971,11 +738,281 @@ function StaffGate({
   );
 }
 
+function WaiterScreen({
+  menuItems,
+  onNavigate,
+}: {
+  menuItems: MenuItem[];
+  onNavigate: (view: View) => void;
+}) {
+  const [selectedTable, setSelectedTable] = useState<number | null>(null);
+  const [category, setCategory] = useState("Tümü");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [note, setNote] = useState("");
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [successInfo, setSuccessInfo] = useState<{
+    tableNo: number;
+    orderId: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!successInfo) return;
+    const timer = window.setTimeout(() => setSuccessInfo(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [successInfo]);
+
+  const categories = useMemo(
+    () => ["Tümü", ...Array.from(new Set(menuItems.map((item) => item.category)))],
+    [menuItems],
+  );
+  const resolvedCategory = categories.includes(category) ? category : "Tümü";
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase("tr-TR");
+  const visibleItems = menuItems.filter(
+    (item) =>
+      (resolvedCategory === "Tümü" || item.category === resolvedCategory) &&
+      (!normalizedSearch ||
+        `${item.name} ${item.description} ${item.category}`
+          .toLocaleLowerCase("tr-TR")
+          .includes(normalizedSearch)),
+  );
+
+  const addToCart = (item: MenuItem) => {
+    if (!selectedTable) return;
+    setCart((current) => {
+      const match = current.find((cartItem) => cartItem.id === item.id);
+      if (!match) return [...current, { ...item, quantity: 1 }];
+      return current.map((cartItem) =>
+        cartItem.id === item.id
+          ? { ...cartItem, quantity: cartItem.quantity + 1 }
+          : cartItem,
+      );
+    });
+  };
+
+  const setQuantity = (id: number, quantity: number) => {
+    setCart((current) =>
+      quantity <= 0
+        ? current.filter((item) => item.id !== id)
+        : current.map((item) => (item.id === id ? { ...item, quantity } : item)),
+    );
+  };
+
+  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const cartTotal = cart.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0,
+  );
+
+  const submitOrder = async () => {
+    if (!selectedTable || !cart.length || submitting) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tableNo: selectedTable,
+          note,
+          items: cart.map(({ id, quantity }) => ({ id, quantity })),
+        }),
+      });
+      const payload = (await response.json()) as { id?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Sipariş gönderilemedi.");
+      setSuccessInfo({
+        tableNo: selectedTable,
+        orderId: (payload.id ?? "").slice(0, 6).toUpperCase(),
+      });
+      setCart([]);
+      setNote("");
+      setReviewOpen(false);
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Sipariş gönderilemedi.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <main className="waiter-app">
+      <header className="waiter-topbar">
+        <div className="brand-lockup">
+          <strong>masa<span>.</span></strong>
+          <small>GARSON</small>
+        </div>
+        <button className="waiter-topbar-link" onClick={() => onNavigate("cashier")}>
+          Kasa ekranı →
+        </button>
+      </header>
+
+      <section className="waiter-table-picker">
+        <p>Sipariş girmek istediğin masayı seç</p>
+        <div className="waiter-table-grid">
+          {Array.from({ length: 12 }, (_, index) => index + 1).map((table) => (
+            <button
+              key={table}
+              className={selectedTable === table ? "active" : ""}
+              onClick={() => setSelectedTable(table)}
+            >
+              {String(table).padStart(2, "0")}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {!selectedTable && (
+        <p className="waiter-hint">
+          Ürün eklemeden önce yukarıdan bir masa seçmelisin.
+        </p>
+      )}
+
+      {successInfo && (
+        <div className="waiter-success-banner">
+          ✓ Masa {String(successInfo.tableNo).padStart(2, "0")} · Sipariş #
+          {successInfo.orderId} kaydedildi.
+        </div>
+      )}
+      {error && <div className="waiter-error-banner">{error}</div>}
+
+      <div className="menu-search-bar waiter-search-bar">
+        <input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Ürün veya kategori ara…"
+        />
+      </div>
+
+      <nav className="menu-tabs" aria-label="Menü kategorileri">
+        {categories.map((item) => (
+          <button
+            key={item}
+            className={resolvedCategory === item ? "active" : ""}
+            onClick={() => setCategory(item)}
+          >
+            {item}
+          </button>
+        ))}
+      </nav>
+
+      <section className="waiter-item-list">
+        {visibleItems.map((item) => {
+          const cartItem = cart.find((entry) => entry.id === item.id);
+          return (
+            <article className="waiter-item-row" key={item.id}>
+              <div>
+                <strong>{item.name}</strong>
+                <small>{money(item.price)}</small>
+              </div>
+              {cartItem ? (
+                <div className="quantity-stepper">
+                  <button onClick={() => setQuantity(item.id, cartItem.quantity - 1)}>
+                    −
+                  </button>
+                  <span>{cartItem.quantity}</span>
+                  <button onClick={() => setQuantity(item.id, cartItem.quantity + 1)}>
+                    +
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="square-add"
+                  disabled={!selectedTable}
+                  onClick={() => addToCart(item)}
+                  aria-label={`${item.name} sepete ekle`}
+                >
+                  +
+                </button>
+              )}
+            </article>
+          );
+        })}
+      </section>
+
+      {cartCount > 0 && (
+        <button className="order-fab" onClick={() => setReviewOpen(true)}>
+          <span className="fab-count">{cartCount}</span>
+          <span>Siparişi gör</span>
+          <strong>{money(cartTotal)}</strong>
+        </button>
+      )}
+
+      {reviewOpen && (
+        <div className="drawer-backdrop" onClick={() => setReviewOpen(false)}>
+          <aside
+            className="order-drawer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="drawer-grip" />
+            <header className="drawer-header">
+              <div>
+                <p>MASA {String(selectedTable).padStart(2, "0")}</p>
+                <h2>Sipariş özeti</h2>
+              </div>
+              <button onClick={() => setReviewOpen(false)} aria-label="Kapat">
+                ×
+              </button>
+            </header>
+            <div className="drawer-items">
+              {cart.map((item) => (
+                <div className="drawer-line" key={item.id}>
+                  <span className="drawer-emoji">{item.emoji}</span>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <small>{money(item.price)}</small>
+                  </div>
+                  <div className="quantity-stepper">
+                    <button onClick={() => setQuantity(item.id, item.quantity - 1)}>
+                      −
+                    </button>
+                    <span>{item.quantity}</span>
+                    <button onClick={() => setQuantity(item.id, item.quantity + 1)}>
+                      +
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <label className="order-note-field">
+              <span>Sipariş notu</span>
+              <textarea
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                maxLength={300}
+                placeholder="Örn. Şekersiz olsun"
+              />
+            </label>
+            <div className="drawer-total">
+              <span>Toplam</span>
+              <strong>{money(cartTotal)}</strong>
+            </div>
+            <button
+              className="send-order-button"
+              disabled={submitting}
+              onClick={submitOrder}
+            >
+              {submitting
+                ? "Gönderiliyor…"
+                : `Masa ${String(selectedTable).padStart(2, "0")}'e gönder`}
+            </button>
+          </aside>
+        </div>
+      )}
+    </main>
+  );
+}
+
 function ManagementSidebar({
   active,
   onNavigate,
 }: {
-  active: "cashier" | "kitchen" | "qr" | "menuEditor";
+  active: "cashier" | "kitchen" | "waiter" | "qr" | "menuEditor";
   onNavigate: (view: View) => void;
 }) {
   return (
@@ -996,6 +1033,12 @@ function ManagementSidebar({
           onClick={() => onNavigate("kitchen")}
         >
           <span>◫</span> Mutfak ekranı
+        </button>
+        <button
+          className={active === "waiter" ? "active" : ""}
+          onClick={() => onNavigate("waiter")}
+        >
+          <span>◍</span> Garson siparişi
         </button>
         <button
           className={active === "qr" ? "active" : ""}
@@ -1024,7 +1067,13 @@ function ManagementSidebar({
   );
 }
 
-function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
+function CashierScreen({
+  menuItems,
+  onNavigate,
+}: {
+  menuItems: MenuItem[];
+  onNavigate: (view: View) => void;
+}) {
   const {
     orders,
     loading,
@@ -1089,6 +1138,21 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
       ? []
       : orders.filter((order) => order.tableNo === selectedTable);
 
+  const addOrderToTable = async (
+    targetTable: number,
+    items: Array<{ id: number; quantity: number }>,
+    note: string,
+  ) => {
+    const response = await fetch("/api/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tableNo: targetTable, items, note }),
+    });
+    const payload = (await response.json()) as { id?: string; error?: string };
+    if (!response.ok) throw new Error(payload.error || "Ürün eklenemedi.");
+    await reload();
+  };
+
   return (
     <main className="management-shell">
       <ManagementSidebar active="cashier" onNavigate={onNavigate} />
@@ -1148,7 +1212,7 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
               <h2>Masa hesapları</h2>
             </div>
             <span>
-              Dolu masaya dokunarak siparişleri ve güncel hesabı görün.
+              Herhangi bir masaya dokunarak hesabı görün veya ürün ekleyin.
             </span>
           </header>
           <div className="table-account-grid">
@@ -1158,10 +1222,7 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
                   account.orders.length ? "occupied" : "available"
                 }
                 key={account.tableNo}
-                onClick={() =>
-                  account.orders.length && setSelectedTable(account.tableNo)
-                }
-                disabled={!account.orders.length}
+                onClick={() => setSelectedTable(account.tableNo)}
               >
                 <div className="table-card-head">
                   <span>Masa</span>
@@ -1192,7 +1253,7 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
                 ) : (
                   <div className="table-empty-state">
                     <span>Müsait</span>
-                    <small>Henüz açık hesap yok</small>
+                    <small>Dokun, ürün ekle</small>
                   </div>
                 )}
               </button>
@@ -1263,10 +1324,12 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
           </div>
         </section>
       </section>
-      {selectedTable !== null && selectedOrders.length > 0 && (
+      {selectedTable !== null && (
         <TableAccountModal
+          key={selectedTable}
           tableNo={selectedTable}
           orders={selectedOrders}
+          menuItems={menuItems}
           onClose={() => setSelectedTable(null)}
           onUpdateStatus={updateStatus}
           onTakePayment={(selections, method) =>
@@ -1276,6 +1339,10 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
             const closed = await closeTable(selectedTable);
             if (closed) setSelectedTable(null);
           }}
+          onAddOrder={(items, note) =>
+            addOrderToTable(selectedTable, items, note)
+          }
+          onRefresh={reload}
         />
       )}
     </main>
@@ -1285,13 +1352,17 @@ function CashierScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
 function TableAccountModal({
   tableNo,
   orders,
+  menuItems,
   onClose,
   onUpdateStatus,
   onTakePayment,
   onCloseAccount,
+  onAddOrder,
+  onRefresh,
 }: {
   tableNo: number;
   orders: Order[];
+  menuItems: MenuItem[];
   onClose: () => void;
   onUpdateStatus: (id: string, status: Order["status"]) => void;
   onTakePayment: (
@@ -1304,6 +1375,11 @@ function TableAccountModal({
     autoClosed: boolean;
   }>;
   onCloseAccount: () => Promise<void>;
+  onAddOrder: (
+    items: Array<{ id: number; quantity: number }>,
+    note: string,
+  ) => Promise<void>;
+  onRefresh: () => Promise<void>;
 }) {
   const [confirmClose, setConfirmClose] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -1313,6 +1389,56 @@ function TableAccountModal({
   const [paying, setPaying] = useState(false);
   const [paymentNotice, setPaymentNotice] = useState("");
   const [paymentError, setPaymentError] = useState("");
+  const [posRequestId, setPosRequestId] = useState<string | null>(null);
+  const [posStatus, setPosStatus] = useState<
+    "pending" | "sent" | "declined" | null
+  >(null);
+  const [addPanelToggle, setAddPanelToggle] = useState<boolean | null>(null);
+  const addPanelOpen = addPanelToggle ?? orders.length === 0;
+  const [addSelections, setAddSelections] = useState<Record<number, number>>(
+    {},
+  );
+  const [addNote, setAddNote] = useState("");
+  const [addingOrder, setAddingOrder] = useState(false);
+  const [addError, setAddError] = useState("");
+
+  const addSetQuantity = (itemId: number, quantity: number) => {
+    setAddSelections((current) => {
+      if (quantity <= 0) {
+        const next = { ...current };
+        delete next[itemId];
+        return next;
+      }
+      return { ...current, [itemId]: quantity };
+    });
+  };
+  const addSelectedCount = Object.values(addSelections).reduce(
+    (sum, quantity) => sum + quantity,
+    0,
+  );
+  const addSelectedTotal = menuItems.reduce(
+    (sum, item) => sum + item.price * (addSelections[item.id] ?? 0),
+    0,
+  );
+  const submitAddOrder = async () => {
+    const items = Object.entries(addSelections)
+      .filter(([, quantity]) => quantity > 0)
+      .map(([id, quantity]) => ({ id: Number(id), quantity }));
+    if (!items.length || addingOrder) return;
+    setAddingOrder(true);
+    setAddError("");
+    try {
+      await onAddOrder(items, addNote);
+      setAddSelections({});
+      setAddNote("");
+    } catch (error) {
+      setAddError(
+        error instanceof Error ? error.message : "Ürün eklenemedi.",
+      );
+    } finally {
+      setAddingOrder(false);
+    }
+  };
   const accountTotal = orders.reduce((sum, order) => sum + order.total, 0);
   const paidTotal = orders.reduce(
     (sum, order) => sum + Number(order.paidTotal ?? 0),
@@ -1395,6 +1521,91 @@ function TableAccountModal({
     setPaymentError("");
   };
 
+  useEffect(() => {
+    if (!posRequestId) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/pos-payments?id=${posRequestId}`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as {
+          request?: {
+            status: "pending" | "sent" | "approved" | "declined" | "cancelled";
+            amount: number;
+            error: string;
+          };
+          error?: string;
+        };
+        if (!active) return;
+        if (!response.ok || !payload.request) {
+          setPosRequestId(null);
+          setPosStatus(null);
+          setPaymentError(payload.error || "POS isteği durumu alınamadı.");
+          return;
+        }
+        const { status, amount, error } = payload.request;
+        if (status === "approved") {
+          setPosRequestId(null);
+          setPosStatus(null);
+          setSelections({});
+          setPaymentNotice(`${money(amount)} kart ile POS üzerinden tahsil edildi.`);
+          await onRefresh();
+          return;
+        }
+        if (status === "declined" || status === "cancelled") {
+          setPosStatus("declined");
+          setPaymentError(error || "POS işlemi tamamlanamadı.");
+          return;
+        }
+        setPosStatus(status);
+      } catch {
+        // Geçici ağ hatası — bir sonraki döngüde tekrar denenir.
+      }
+    };
+    poll();
+    const timer = window.setInterval(poll, 2000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [posRequestId, onRefresh]);
+
+  const cancelPosRequest = async () => {
+    if (!posRequestId) return;
+    await fetch(`/api/pos-payments?id=${posRequestId}`, { method: "DELETE" });
+    setPosRequestId(null);
+    setPosStatus(null);
+    setPaymentError("");
+  };
+
+  const sendCardToPos = async (paymentSelections: PaymentSelection[]) => {
+    setPaying(true);
+    setPaymentError("");
+    try {
+      const response = await fetch("/api/pos-payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableNo, selections: paymentSelections }),
+      });
+      const payload = (await response.json()) as {
+        id?: string;
+        error?: string;
+      };
+      if (!response.ok || !payload.id) {
+        throw new Error(payload.error || "POS isteği oluşturulamadı.");
+      }
+      setPosRequestId(payload.id);
+      setPosStatus("pending");
+    } catch (error) {
+      setPaymentError(
+        error instanceof Error ? error.message : "POS isteği oluşturulamadı.",
+      );
+    } finally {
+      setPaying(false);
+    }
+  };
+
   const takeSelectedPayment = async () => {
     const paymentSelections = orders.flatMap((order) =>
       order.items.flatMap((item) => {
@@ -1406,6 +1617,11 @@ function TableAccountModal({
     );
     if (!paymentSelections.length || paying) return;
 
+    if (paymentMethod === "card") {
+      await sendCardToPos(paymentSelections);
+      return;
+    }
+
     setPaying(true);
     setPaymentError("");
     try {
@@ -1416,9 +1632,7 @@ function TableAccountModal({
         return;
       }
       setPaymentNotice(
-        `${money(result.total)} ${
-          result.method === "cash" ? "nakit" : "kart"
-        } ile tahsil edildi. Kalan hesap ${money(result.remainingTotal)}.`,
+        `${money(result.total)} nakit ile tahsil edildi. Kalan hesap ${money(result.remainingTotal)}.`,
       );
     } catch (error) {
       setPaymentError(
@@ -1445,6 +1659,80 @@ function TableAccountModal({
           </div>
           <button onClick={onClose} aria-label="Masa hesabını kapat">×</button>
         </header>
+
+        <section className="table-add-item-panel">
+          <header>
+            <div>
+              <p>SİPARİŞ GİR</p>
+              <strong>
+                {orders.length === 0
+                  ? "Bu masada henüz sipariş yok"
+                  : "Masaya ürün ekle"}
+              </strong>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAddPanelToggle(!addPanelOpen)}
+            >
+              {addPanelOpen ? "Kapat" : "+ Ürün ekle"}
+            </button>
+          </header>
+          {addPanelOpen && (
+            <>
+              <div className="item-picker-list">
+                {menuItems.map((item) => {
+                  const quantity = addSelections[item.id] ?? 0;
+                  return (
+                    <div className="item-picker-row" key={item.id}>
+                      <span>
+                        <strong>{item.name}</strong>
+                        <small>{money(item.price)}</small>
+                      </span>
+                      <div className="quantity-stepper">
+                        <button
+                          type="button"
+                          onClick={() => addSetQuantity(item.id, quantity - 1)}
+                        >
+                          −
+                        </button>
+                        <span>{quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => addSetQuantity(item.id, quantity + 1)}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <label className="order-note-field">
+                <span>Sipariş notu</span>
+                <textarea
+                  value={addNote}
+                  onChange={(event) => setAddNote(event.target.value)}
+                  maxLength={300}
+                  placeholder="Örn. Şekersiz olsun"
+                />
+              </label>
+              {addError && <div className="payment-notice error">{addError}</div>}
+              <div className="table-add-item-footer">
+                <span>
+                  {addSelectedCount} ürün · {money(addSelectedTotal)}
+                </span>
+                <button
+                  type="button"
+                  className="take-payment-button"
+                  disabled={!addSelectedCount || addingOrder}
+                  onClick={submitAddOrder}
+                >
+                  {addingOrder ? "Ekleniyor…" : "Masaya ekle"}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
 
         <div className="table-order-history">
           {unpaidOrders.map((order, index) => (
@@ -1559,17 +1847,19 @@ function TableAccountModal({
           ))}
         </div>
 
-        <div className="table-account-summary">
-          <div>
-            <span>Kalan masa hesabı</span>
-            <small>
-              Toplam {money(accountTotal)} · Ödenen {money(paidTotal)}
-            </small>
+        {orders.length > 0 && (
+          <div className="table-account-summary">
+            <div>
+              <span>Kalan masa hesabı</span>
+              <small>
+                Toplam {money(accountTotal)} · Ödenen {money(paidTotal)}
+              </small>
+            </div>
+            <strong>{money(remainingTotal)}</strong>
           </div>
-          <strong>{money(remainingTotal)}</strong>
-        </div>
+        )}
 
-        {remainingTotal > 0 ? (
+        {orders.length > 0 && (remainingTotal > 0 ? (
           <section className="split-payment-panel">
             <header>
               <div>
@@ -1588,6 +1878,7 @@ function TableAccountModal({
               <button
                 className={paymentMethod === "card" ? "active" : ""}
                 type="button"
+                disabled={posRequestId !== null}
                 onClick={() => setPaymentMethod("card")}
               >
                 <span>▣</span> Kart
@@ -1595,6 +1886,7 @@ function TableAccountModal({
               <button
                 className={paymentMethod === "cash" ? "active" : ""}
                 type="button"
+                disabled={posRequestId !== null}
                 onClick={() => setPaymentMethod("cash")}
               >
                 <span>₺</span> Nakit
@@ -1610,19 +1902,39 @@ function TableAccountModal({
             {paymentNotice && (
               <div className="payment-notice success">✓ {paymentNotice}</div>
             )}
+            {posRequestId && posStatus !== "declined" && (
+              <div className="pos-waiting-banner">
+                <i />
+                <span>POS cihazında bekleniyor… müşteri kartını okutsun.</span>
+              </div>
+            )}
             {paymentError && (
               <div className="payment-notice error">{paymentError}</div>
             )}
-            <button
-              className="take-payment-button"
-              type="button"
-              disabled={!selectedTotal || paying}
-              onClick={takeSelectedPayment}
-            >
-              {paying
-                ? "Ödeme işleniyor…"
-                : `${money(selectedTotal)} tahsil et`}
-            </button>
+            {posRequestId ? (
+              <button
+                className="take-payment-button pos-cancel-button"
+                type="button"
+                onClick={cancelPosRequest}
+              >
+                {posStatus === "declined" ? "Tekrar dene" : "POS isteğini iptal et"}
+              </button>
+            ) : (
+              <button
+                className="take-payment-button"
+                type="button"
+                disabled={!selectedTotal || paying}
+                onClick={takeSelectedPayment}
+              >
+                {paying
+                  ? paymentMethod === "card"
+                    ? "POS'a gönderiliyor…"
+                    : "Ödeme işleniyor…"
+                  : paymentMethod === "card"
+                    ? `${money(selectedTotal)} tutarını POS'a gönder`
+                    : `${money(selectedTotal)} tahsil et`}
+              </button>
+            )}
           </section>
         ) : (
           <div className="payment-complete">
@@ -1632,36 +1944,37 @@ function TableAccountModal({
               <small>Masayı yeni müşteri için kapatabilirsiniz.</small>
             </div>
           </div>
-        )}
+        ))}
 
-        {remainingTotal === 0 && !confirmClose ? (
-          <button
-            className="close-account-button"
-            onClick={() => setConfirmClose(true)}
-          >
-            Ödenen hesabı kapat
-          </button>
-        ) : remainingTotal === 0 ? (
-          <div className="close-account-confirm">
-            <p>
-              Masa {tableNo} hesabı kapatılacak ve yeni müşteri için
-              sıfırlanacak.
-            </p>
-            <div>
-              <button onClick={() => setConfirmClose(false)}>Vazgeç</button>
-              <button
-                disabled={closing}
-                onClick={async () => {
-                  setClosing(true);
-                  await onCloseAccount();
-                  setClosing(false);
-                }}
-              >
-                {closing ? "Kapatılıyor…" : "Evet, masayı kapat"}
-              </button>
+        {orders.length > 0 &&
+          (remainingTotal === 0 && !confirmClose ? (
+            <button
+              className="close-account-button"
+              onClick={() => setConfirmClose(true)}
+            >
+              Ödenen hesabı kapat
+            </button>
+          ) : remainingTotal === 0 ? (
+            <div className="close-account-confirm">
+              <p>
+                Masa {tableNo} hesabı kapatılacak ve yeni müşteri için
+                sıfırlanacak.
+              </p>
+              <div>
+                <button onClick={() => setConfirmClose(false)}>Vazgeç</button>
+                <button
+                  disabled={closing}
+                  onClick={async () => {
+                    setClosing(true);
+                    await onCloseAccount();
+                    setClosing(false);
+                  }}
+                >
+                  {closing ? "Kapatılıyor…" : "Evet, masayı kapat"}
+                </button>
+              </div>
             </div>
-          </div>
-        ) : null}
+          ) : null)}
       </aside>
     </div>
   );
@@ -1742,6 +2055,9 @@ function KitchenScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
           </button>
           <button onClick={() => onNavigate("cashier")} aria-label="Kasa paneli">
             <span>▦</span><em>Masa planı</em>
+          </button>
+          <button onClick={() => onNavigate("waiter")} aria-label="Garson siparişi">
+            <span>◍</span><em>Garson siparişi</em>
           </button>
           <button onClick={() => onNavigate("menuEditor")} aria-label="Menü yönetimi">
             <span>≡</span><em>Menü yönetimi</em>
@@ -1839,10 +2155,95 @@ type MenuDraft = {
   emoji: string;
   imageKey: string | null;
   imageUrl: string | null;
+  imageFocalX: number;
+  imageFocalY: number;
   popular: boolean;
   available: boolean;
   sortOrder: number;
 };
+
+function ImageFocalPicker({
+  src,
+  alt,
+  focalX,
+  focalY,
+  onChange,
+}: {
+  src: string;
+  alt: string;
+  focalX: number;
+  focalY: number;
+  onChange: (x: number, y: number) => void;
+}) {
+  const stageRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const updateFromPoint = (clientX: number, clientY: number) => {
+    const stage = stageRef.current;
+    const img = imgRef.current;
+    if (!stage || !img || !img.naturalWidth || !img.naturalHeight) return;
+    const naturalSize = { w: img.naturalWidth, h: img.naturalHeight };
+    const rect = stage.getBoundingClientRect();
+    const scale = Math.min(rect.width / naturalSize.w, rect.height / naturalSize.h);
+    const renderedW = naturalSize.w * scale;
+    const renderedH = naturalSize.h * scale;
+    const offsetX = (rect.width - renderedW) / 2;
+    const offsetY = (rect.height - renderedH) / 2;
+    const localX = clientX - rect.left - offsetX;
+    const localY = clientY - rect.top - offsetY;
+    const pctX = Math.min(100, Math.max(0, (localX / renderedW) * 100));
+    const pctY = Math.min(100, Math.max(0, (localY / renderedH) * 100));
+    onChange(Math.round(pctX), Math.round(pctY));
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragging(true);
+    updateFromPoint(event.clientX, event.clientY);
+  };
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragging) return;
+    updateFromPoint(event.clientX, event.clientY);
+  };
+  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setDragging(false);
+  };
+
+  return (
+    <div className="image-focal-picker">
+      <div
+        className={dragging ? "image-focal-stage dragging" : "image-focal-stage"}
+        ref={stageRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt={alt} draggable={false} ref={imgRef} />
+        <div
+          className="image-focal-pin"
+          style={{ left: `${focalX}%`, top: `${focalY}%` }}
+          aria-hidden="true"
+        />
+        <span className="image-focal-hint">Sürükleyerek odak noktasını ayarla</span>
+      </div>
+      <div className="image-focal-preview">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt=""
+          style={{ objectPosition: `${focalX}% ${focalY}%` }}
+        />
+        <small>Kartlarda böyle görünecek</small>
+      </div>
+    </div>
+  );
+}
 
 function MenuEditorScreen({
   onNavigate,
@@ -1891,6 +2292,10 @@ function MenuEditorScreen({
   const categories = Array.from(
     new Set(items.map((item) => item.category)),
   );
+  const itemsByCategory = categories.map((category) => ({
+    category,
+    items: items.filter((item) => item.category === category),
+  }));
 
   const refreshMenus = async () => {
     await Promise.all([loadMenu(), onMenuChanged()]);
@@ -1962,7 +2367,13 @@ function MenuEditorScreen({
       }
       setDraft((current) =>
         current
-          ? { ...current, imageKey: payload.key!, imageUrl: payload.url! }
+          ? {
+              ...current,
+              imageKey: payload.key!,
+              imageUrl: payload.url!,
+              imageFocalX: 50,
+              imageFocalY: 50,
+            }
           : current,
       );
     } catch (uploadError) {
@@ -2049,6 +2460,8 @@ function MenuEditorScreen({
                 emoji: "☕",
                 imageKey: null,
                 imageUrl: null,
+                imageFocalX: 50,
+                imageFocalY: 50,
                 popular: false,
                 available: true,
                 sortOrder: items.length + 1,
@@ -2078,57 +2491,75 @@ function MenuEditorScreen({
         </section>
 
         {error && <div className="admin-error">{error}</div>}
-        <section className="menu-editor-grid" aria-live="polite">
-          {!items.length && (
-            <div className="admin-empty">
-              <span>☕</span>
-              <strong>{loading ? "Menü yükleniyor…" : "Menü boş"}</strong>
-              <p>Yeni ürün ekleyerek müşteri menüsünü oluşturun.</p>
-            </div>
-          )}
-          {items.map((item) => (
-            <article
-              className={!item.available ? "menu-editor-item unavailable" : ""}
-              key={item.id}
-            >
-              <header>
-                <span className="menu-editor-thumb">
-                  {item.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={item.imageUrl} alt="" />
-                  ) : (
-                    "masa."
-                  )}
-                </span>
-                <div>
-                  <small>{item.category}</small>
-                  <h2>{item.name}</h2>
-                </div>
-                {item.popular && <b>Popüler</b>}
+        {!items.length ? (
+          <div className="admin-empty">
+            <span>☕</span>
+            <strong>{loading ? "Menü yükleniyor…" : "Menü boş"}</strong>
+            <p>Yeni ürün ekleyerek müşteri menüsünü oluşturun.</p>
+          </div>
+        ) : (
+          itemsByCategory.map(({ category, items: categoryItems }) => (
+            <section className="menu-editor-category" key={category}>
+              <header className="menu-editor-category-header">
+                <h2>{category}</h2>
+                <span>{categoryItems.length} ürün</span>
               </header>
-              <p>{item.description || "Ürün açıklaması bulunmuyor."}</p>
-              <div className="menu-editor-item-price">
-                <strong>{money(item.price)}</strong>
-                <span className={item.available ? "available" : ""}>
-                  {item.available ? "Satışta" : "Satış dışı"}
-                </span>
+              <div className="menu-editor-grid" aria-live="polite">
+                {categoryItems.map((item) => (
+                  <article
+                    className={!item.available ? "menu-editor-card unavailable" : "menu-editor-card"}
+                    key={item.id}
+                  >
+                    <div className="menu-editor-card-photo">
+                      {item.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={item.imageUrl}
+                          alt={item.name}
+                          style={imageFocalStyle(item)}
+                        />
+                      ) : (
+                        <span>Fotoğraf yok</span>
+                      )}
+                      {item.popular && <b>Popüler</b>}
+                    </div>
+                    <div className="menu-editor-card-body">
+                      <div className="menu-editor-card-title">
+                        <h3>{item.name}</h3>
+                        <strong>{money(item.price)}</strong>
+                      </div>
+                      <p>{item.description || "Ürün açıklaması bulunmuyor."}</p>
+                      <span
+                        className={
+                          item.available
+                            ? "menu-editor-status available"
+                            : "menu-editor-status"
+                        }
+                      >
+                        {item.available ? "Satışta" : "Satış dışı"}
+                      </span>
+                    </div>
+                    <footer>
+                      <button onClick={() => setDraft({ ...item })}>
+                        ✎ Düzenle
+                      </button>
+                      <button onClick={() => toggleAvailability(item)}>
+                        {item.available ? "Satıştan kaldır" : "Satışa aç"}
+                      </button>
+                      <button
+                        className="delete-menu-item"
+                        onClick={() => deleteItem(item)}
+                        aria-label={`${item.name} ürününü sil`}
+                      >
+                        🗑
+                      </button>
+                    </footer>
+                  </article>
+                ))}
               </div>
-              <footer>
-                <button onClick={() => setDraft({ ...item })}>Düzenle</button>
-                <button onClick={() => toggleAvailability(item)}>
-                  {item.available ? "Satıştan kaldır" : "Satışa aç"}
-                </button>
-                <button
-                  className="delete-menu-item"
-                  onClick={() => deleteItem(item)}
-                  aria-label={`${item.name} ürününü sil`}
-                >
-                  ×
-                </button>
-              </footer>
-            </article>
-          ))}
-        </section>
+            </section>
+          ))
+        )}
       </section>
 
       {draft && (
@@ -2154,38 +2585,67 @@ function MenuEditorScreen({
               </button>
             </header>
             <div className="menu-editor-form">
-              <div className="menu-photo-editor">
-                <div>
-                  {draft.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={draft.imageUrl} alt={draft.name || "Ürün"} />
-                  ) : (
-                    <span>Fotoğraf eklenmedi</span>
+              <div className="menu-photo-dropzone">
+                {draft.imageUrl ? (
+                  <ImageFocalPicker
+                    src={draft.imageUrl}
+                    alt={draft.name || "Ürün"}
+                    focalX={draft.imageFocalX}
+                    focalY={draft.imageFocalY}
+                    onChange={(x, y) =>
+                      setDraft((current) =>
+                        current
+                          ? { ...current, imageFocalX: x, imageFocalY: y }
+                          : current,
+                      )
+                    }
+                  />
+                ) : (
+                  <div className="menu-photo-preview">
+                    <div className="menu-photo-placeholder">
+                      <span>📷</span>
+                      <small>Henüz fotoğraf eklenmedi</small>
+                    </div>
+                  </div>
+                )}
+                <div className="menu-photo-actions">
+                  <label className="menu-photo-upload-button">
+                    <span>
+                      {uploadingImage
+                        ? "Yükleniyor…"
+                        : draft.imageUrl
+                          ? "Fotoğrafı değiştir"
+                          : "Fotoğraf yükle"}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/avif"
+                      disabled={uploadingImage}
+                      onChange={uploadDraftImage}
+                    />
+                  </label>
+                  {draft.imageKey && (
+                    <button
+                      type="button"
+                      className="menu-photo-remove"
+                      disabled={uploadingImage}
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          imageKey: null,
+                          imageUrl: null,
+                          imageFocalX: 50,
+                          imageFocalY: 50,
+                        })
+                      }
+                    >
+                      Fotoğrafı kaldır
+                    </button>
                   )}
                 </div>
-                <label>
-                  <span>
-                    {uploadingImage ? "Yükleniyor…" : "Fotoğraf seç"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/avif"
-                    disabled={uploadingImage}
-                    onChange={uploadDraftImage}
-                  />
-                </label>
-                {draft.imageKey && (
-                  <button
-                    type="button"
-                    disabled={uploadingImage}
-                    onClick={() =>
-                      setDraft({ ...draft, imageKey: null, imageUrl: null })
-                    }
-                  >
-                    Fotoğrafı kaldır
-                  </button>
-                )}
-                <small>JPG, PNG, WebP veya AVIF · en fazla 5 MB</small>
+                <small className="menu-photo-hint">
+                  JPG, PNG, WebP veya AVIF · en fazla 5 MB
+                </small>
               </div>
               <div className="menu-form-pair">
                 <label>
@@ -2344,7 +2804,8 @@ function QrScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
             <p>MASA YÖNETİMİ</p>
             <h1>QR Kodları</h1>
             <span>
-              Her QR kod siparişi otomatik olarak doğru masaya bağlar.
+              Her QR kod, müşterinin yalnızca menüyü görüntülediği sayfayı
+              açar. Sipariş girişi garson veya kasa ekranından yapılır.
             </span>
           </div>
           <button onClick={() => onNavigate("cashier")}>← Panele dön</button>
@@ -2367,7 +2828,7 @@ function QrScreen({ onNavigate }: { onNavigate: (view: View) => void }) {
                   )}
                 </div>
                 <h2>Masa {String(table).padStart(2, "0")}</h2>
-                <p>Okut · Seç · Sipariş ver</p>
+                <p>Okut · Menüyü incele</p>
                 {codes[table] && (
                   <a href={codes[table]} download={`masa-${table}-qr.png`}>
                     QR kodu indir

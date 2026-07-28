@@ -10,9 +10,16 @@ type MenuPayload = {
   price?: number;
   emoji?: string;
   imageKey?: string | null;
+  imageFocalX?: number;
+  imageFocalY?: number;
   popular?: boolean;
   available?: boolean;
   sortOrder?: number;
+};
+
+const clampFocal = (value: unknown) => {
+  const number = Math.round(Number(value));
+  return Number.isFinite(number) ? Math.min(100, Math.max(0, number)) : 50;
 };
 
 function normalizeMenuPayload(payload: MenuPayload) {
@@ -24,6 +31,8 @@ function normalizeMenuPayload(payload: MenuPayload) {
   const imageKey = payload.imageKey
     ? String(payload.imageKey).trim().slice(0, 180)
     : null;
+  const imageFocalX = clampFocal(payload.imageFocalX ?? 50);
+  const imageFocalY = clampFocal(payload.imageFocalY ?? 50);
   const sortOrder = Math.max(0, Math.round(Number(payload.sortOrder ?? 0)));
 
   if (!name || !category || !Number.isInteger(price) || price < 0) {
@@ -37,6 +46,8 @@ function normalizeMenuPayload(payload: MenuPayload) {
     price,
     emoji,
     imageKey,
+    imageFocalX,
+    imageFocalY,
     popular: Boolean(payload.popular),
     available: payload.available !== false,
     sortOrder,
@@ -52,6 +63,8 @@ function mapMenuItem(row: Record<string, unknown>) {
     popular: Boolean(row.popular),
     available: Boolean(row.available),
     sortOrder: Number(row.sortOrder),
+    imageFocalX: Number(row.imageFocalX ?? 50),
+    imageFocalY: Number(row.imageFocalY ?? 50),
     imageKey,
     imageUrl: imageKey
       ? `/api/menu-images?key=${encodeURIComponent(imageKey)}`
@@ -74,6 +87,7 @@ export async function GET(request: Request) {
     const result = await env.DB.prepare(
       `SELECT id, name, description, category, price, emoji,
         image_key AS imageKey,
+        image_focal_x AS imageFocalX, image_focal_y AS imageFocalY,
         popular, available, sort_order AS sortOrder
        FROM menu_items
        ${admin ? "" : "WHERE available = 1"}
@@ -115,8 +129,8 @@ export async function POST(request: Request) {
 
     const result = await env.DB.prepare(
       `INSERT INTO menu_items
-        (name, description, category, price, emoji, image_key, popular, available, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (name, description, category, price, emoji, image_key, image_focal_x, image_focal_y, popular, available, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         item.name,
@@ -125,6 +139,8 @@ export async function POST(request: Request) {
         item.price,
         item.emoji,
         item.imageKey,
+        item.imageFocalX,
+        item.imageFocalY,
         item.popular ? 1 : 0,
         item.available ? 1 : 0,
         item.sortOrder,
@@ -165,7 +181,8 @@ export async function PATCH(request: Request) {
     const result = await env.DB.prepare(
       `UPDATE menu_items
        SET name = ?, description = ?, category = ?, price = ?, emoji = ?,
-         image_key = ?, popular = ?, available = ?, sort_order = ?
+         image_key = ?, image_focal_x = ?, image_focal_y = ?,
+         popular = ?, available = ?, sort_order = ?
        WHERE id = ?`,
     )
       .bind(
@@ -175,6 +192,8 @@ export async function PATCH(request: Request) {
         item.price,
         item.emoji,
         item.imageKey,
+        item.imageFocalX,
+        item.imageFocalY,
         item.popular ? 1 : 0,
         item.available ? 1 : 0,
         item.sortOrder,
