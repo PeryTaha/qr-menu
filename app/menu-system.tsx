@@ -5,8 +5,12 @@ import {
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type WheelEvent as ReactWheelEvent,
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -2162,88 +2166,237 @@ type MenuDraft = {
   sortOrder: number;
 };
 
-function ImageFocalPicker({
-  src,
-  alt,
-  focalX,
-  focalY,
-  onChange,
-}: {
-  src: string;
-  alt: string;
-  focalX: number;
-  focalY: number;
-  onChange: (x: number, y: number) => void;
-}) {
+const CROP_OUTPUT_WIDTH = 1000;
+const CROP_OUTPUT_HEIGHT = 750;
+const CROP_MIN_ZOOM = 1;
+const CROP_MAX_ZOOM = 3;
+
+type ImageCropHandle = {
+  isDirty: () => boolean;
+  exportCroppedBlob: () => Promise<Blob | null>;
+};
+
+type CropGeometry = {
+  frameW: number;
+  frameH: number;
+  coverScale: number;
+  effectiveScale: number;
+  renderedW: number;
+  renderedH: number;
+  maxPanX: number;
+  maxPanY: number;
+};
+
+const ImageCropStage = forwardRef<
+  ImageCropHandle,
+  { src: string; alt: string }
+>(function ImageCropStage({ src, alt }, ref) {
   const stageRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const dragStartRef = useRef<{
+    x: number;
+    y: number;
+    panX: number;
+    panY: number;
+  } | null>(null);
+  const dirtyRef = useRef(false);
+
+  const [naturalSize, setNaturalSize] = useState<{
+    w: number;
+    h: number;
+  } | null>(null);
+  const [frameSize, setFrameSize] = useState({ w: 320, h: 240 });
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
 
-  const updateFromPoint = (clientX: number, clientY: number) => {
+  const captureNaturalSize = useCallback((img: HTMLImageElement | null) => {
+    if (!img || !img.naturalWidth || !img.naturalHeight) return;
+    setNaturalSize((current) =>
+      current && current.w === img.naturalWidth && current.h === img.naturalHeight
+        ? current
+        : { w: img.naturalWidth, h: img.naturalHeight },
+    );
+  }, []);
+
+  const setImgRef = useCallback(
+    (node: HTMLImageElement | null) => {
+      imgRef.current = node;
+      captureNaturalSize(node);
+    },
+    [captureNaturalSize],
+  );
+
+  useLayoutEffect(() => {
     const stage = stageRef.current;
-    const img = imgRef.current;
-    if (!stage || !img || !img.naturalWidth || !img.naturalHeight) return;
-    const naturalSize = { w: img.naturalWidth, h: img.naturalHeight };
-    const rect = stage.getBoundingClientRect();
-    const scale = Math.min(rect.width / naturalSize.w, rect.height / naturalSize.h);
-    const renderedW = naturalSize.w * scale;
-    const renderedH = naturalSize.h * scale;
-    const offsetX = (rect.width - renderedW) / 2;
-    const offsetY = (rect.height - renderedH) / 2;
-    const localX = clientX - rect.left - offsetX;
-    const localY = clientY - rect.top - offsetY;
-    const pctX = Math.min(100, Math.max(0, (localX / renderedW) * 100));
-    const pctY = Math.min(100, Math.max(0, (localY / renderedH) * 100));
-    onChange(Math.round(pctX), Math.round(pctY));
+    if (!stage) return;
+    const measure = () =>
+      setFrameSize({ w: stage.clientWidth, h: stage.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, []);
+
+  const computeGeometry = (zoomValue: number): CropGeometry | null => {
+    if (!naturalSize || !frameSize.w || !frameSize.h) return null;
+    const coverScale = Math.max(
+      frameSize.w / naturalSize.w,
+      frameSize.h / naturalSize.h,
+    );
+    const effectiveScale = coverScale * zoomValue;
+    const renderedW = naturalSize.w * effectiveScale;
+    const renderedH = naturalSize.h * effectiveScale;
+    return {
+      frameW: frameSize.w,
+      frameH: frameSize.h,
+      coverScale,
+      effectiveScale,
+      renderedW,
+      renderedH,
+      maxPanX: Math.max(0, (renderedW - frameSize.w) / 2),
+      maxPanY: Math.max(0, (renderedH - frameSize.h) / 2),
+    };
   };
+
+  const clampPan = (x: number, y: number, geo: CropGeometry) => ({
+    x: Math.min(geo.maxPanX, Math.max(-geo.maxPanX, x)),
+    y: Math.min(geo.maxPanY, Math.max(-geo.maxPanY, y)),
+  });
+
+  const geometry = computeGeometry(zoom);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     setDragging(true);
-    updateFromPoint(event.clientX, event.clientY);
+    dragStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    };
   };
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!dragging) return;
-    updateFromPoint(event.clientX, event.clientY);
+    if (!dragging || !dragStartRef.current || !geometry) return;
+    const dx = event.clientX - dragStartRef.current.x;
+    const dy = event.clientY - dragStartRef.current.y;
+    setPan(
+      clampPan(dragStartRef.current.panX + dx, dragStartRef.current.panY + dy, geometry),
+    );
+    dirtyRef.current = true;
   };
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     setDragging(false);
+    dragStartRef.current = null;
   };
 
+  const applyZoom = (nextZoom: number) => {
+    const clamped = Math.min(CROP_MAX_ZOOM, Math.max(CROP_MIN_ZOOM, nextZoom));
+    const geo = computeGeometry(clamped);
+    setZoom(clamped);
+    if (geo) setPan((current) => clampPan(current.x, current.y, geo));
+    dirtyRef.current = true;
+  };
+
+  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    applyZoom(zoom + (event.deltaY > 0 ? -0.08 : 0.08));
+  };
+
+  const reset = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    dirtyRef.current = true;
+  };
+
+  useImperativeHandle(ref, () => ({
+    isDirty: () => dirtyRef.current,
+    exportCroppedBlob: async () => {
+      const img = imgRef.current;
+      const geo = computeGeometry(zoom);
+      if (!img || !geo) return null;
+      const imageLeft = geo.frameW / 2 + pan.x - geo.renderedW / 2;
+      const imageTop = geo.frameH / 2 + pan.y - geo.renderedH / 2;
+      const sourceX = -imageLeft / geo.effectiveScale;
+      const sourceY = -imageTop / geo.effectiveScale;
+      const sourceW = geo.frameW / geo.effectiveScale;
+      const sourceH = geo.frameH / geo.effectiveScale;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = CROP_OUTPUT_WIDTH;
+      canvas.height = CROP_OUTPUT_HEIGHT;
+      const context = canvas.getContext("2d");
+      if (!context) return null;
+      context.drawImage(
+        img,
+        sourceX,
+        sourceY,
+        sourceW,
+        sourceH,
+        0,
+        0,
+        CROP_OUTPUT_WIDTH,
+        CROP_OUTPUT_HEIGHT,
+      );
+      return new Promise((resolve) =>
+        canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92),
+      );
+    },
+  }));
+
   return (
-    <div className="image-focal-picker">
+    <div className="image-crop-picker">
       <div
-        className={dragging ? "image-focal-stage dragging" : "image-focal-stage"}
+        className={dragging ? "image-crop-stage dragging" : "image-crop-stage"}
         ref={stageRef}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        onWheel={handleWheel}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={alt} draggable={false} ref={imgRef} />
-        <div
-          className="image-focal-pin"
-          style={{ left: `${focalX}%`, top: `${focalY}%` }}
-          aria-hidden="true"
-        />
-        <span className="image-focal-hint">Sürükleyerek odak noktasını ayarla</span>
-      </div>
-      <div className="image-focal-preview">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={src}
-          alt=""
-          style={{ objectPosition: `${focalX}% ${focalY}%` }}
+          alt={alt}
+          draggable={false}
+          crossOrigin="anonymous"
+          ref={setImgRef}
+          onLoad={(event) => captureNaturalSize(event.currentTarget)}
+          style={
+            naturalSize && geometry
+              ? {
+                  width: naturalSize.w * geometry.effectiveScale,
+                  height: naturalSize.h * geometry.effectiveScale,
+                  transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px)`,
+                }
+              : { opacity: 0 }
+          }
         />
-        <small>Kartlarda böyle görünecek</small>
+        <span className="image-crop-hint">Sürükle · tekerlekle yakınlaştır</span>
+      </div>
+      <div className="image-crop-controls">
+        <label className="image-crop-zoom">
+          <span>🔍</span>
+          <input
+            type="range"
+            min={CROP_MIN_ZOOM}
+            max={CROP_MAX_ZOOM}
+            step={0.01}
+            value={zoom}
+            onChange={(event) => applyZoom(Number(event.target.value))}
+          />
+        </label>
+        <button type="button" onClick={reset}>
+          Sıfırla
+        </button>
       </div>
     </div>
   );
-}
+});
 
 function MenuEditorScreen({
   onNavigate,
@@ -2258,6 +2411,7 @@ function MenuEditorScreen({
   const [draft, setDraft] = useState<MenuDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const cropStageRef = useRef<ImageCropHandle>(null);
 
   const loadMenu = useCallback(async () => {
     try {
@@ -2317,21 +2471,66 @@ function MenuEditorScreen({
       const previousImageKey = draft.id
         ? items.find((item) => item.id === draft.id)?.imageKey
         : null;
+
+      let finalDraft = draft;
+      let retiredUploadKey: string | null = null;
+
+      if (draft.imageUrl && cropStageRef.current?.isDirty()) {
+        const blob = await cropStageRef.current.exportCroppedBlob();
+        if (!blob) {
+          throw new Error("Fotoğraf kırpılamadı.");
+        }
+        const form = new FormData();
+        form.set("file", new File([blob], "crop.jpg", { type: "image/jpeg" }));
+        const uploadResponse = await fetch("/api/menu-images", {
+          method: "POST",
+          body: form,
+        });
+        const uploadPayload = (await uploadResponse.json()) as {
+          key?: string;
+          url?: string;
+          error?: string;
+        };
+        if (!uploadResponse.ok || !uploadPayload.key || !uploadPayload.url) {
+          throw new Error(
+            uploadPayload.error || "Kırpılan fotoğraf yüklenemedi.",
+          );
+        }
+        retiredUploadKey = draft.imageKey;
+        finalDraft = {
+          ...draft,
+          imageKey: uploadPayload.key,
+          imageUrl: uploadPayload.url,
+          imageFocalX: 50,
+          imageFocalY: 50,
+        };
+      }
+
       const response = await fetch("/api/menu", {
-        method: draft.id ? "PATCH" : "POST",
+        method: finalDraft.id ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
+        body: JSON.stringify(finalDraft),
       });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) {
         throw new Error(payload.error || "Ürün kaydedilemedi.");
       }
-      if (previousImageKey && previousImageKey !== draft.imageKey) {
-        await fetch(
-          `/api/menu-images?key=${encodeURIComponent(previousImageKey)}`,
-          { method: "DELETE" },
-        );
+
+      const staleKeys = new Set<string>();
+      if (previousImageKey && previousImageKey !== finalDraft.imageKey) {
+        staleKeys.add(previousImageKey);
       }
+      if (retiredUploadKey && retiredUploadKey !== finalDraft.imageKey) {
+        staleKeys.add(retiredUploadKey);
+      }
+      await Promise.all(
+        Array.from(staleKeys).map((key) =>
+          fetch(`/api/menu-images?key=${encodeURIComponent(key)}`, {
+            method: "DELETE",
+          }),
+        ),
+      );
+
       setDraft(null);
       await refreshMenus();
     } catch (saveError) {
@@ -2587,18 +2786,11 @@ function MenuEditorScreen({
             <div className="menu-editor-form">
               <div className="menu-photo-dropzone">
                 {draft.imageUrl ? (
-                  <ImageFocalPicker
+                  <ImageCropStage
+                    key={draft.imageKey}
+                    ref={cropStageRef}
                     src={draft.imageUrl}
                     alt={draft.name || "Ürün"}
-                    focalX={draft.imageFocalX}
-                    focalY={draft.imageFocalY}
-                    onChange={(x, y) =>
-                      setDraft((current) =>
-                        current
-                          ? { ...current, imageFocalX: x, imageFocalY: y }
-                          : current,
-                      )
-                    }
                   />
                 ) : (
                   <div className="menu-photo-preview">
